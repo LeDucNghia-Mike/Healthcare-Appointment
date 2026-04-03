@@ -2,7 +2,6 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from app.config import ADMIN_DB_CONFIG, APP_DB_CONFIG
 
-
 def get_admin_connection():
     # explanation: connect to DB admin 
     return psycopg2.connect(**ADMIN_DB_CONFIG)
@@ -33,3 +32,20 @@ def execute_query(query: str, params=None, fetch: bool = False):
 def fetch_all(query: str, params=None):
     # explanation: Shortcut để lấy toàn bộ rows dưới dạng dict.
     return execute_query(query, params=params, fetch=True)
+
+def fetch_one(query: str, params=None):
+    conn = get_app_connection()  # ✅ dùng cái đã có
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, params or ())
+            result = cur.fetchone()
+
+            conn.commit()   # 🔥 THÊM DÒNG NÀY
+
+            return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

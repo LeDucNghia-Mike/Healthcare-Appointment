@@ -111,11 +111,12 @@ def seed_patients(n: int = 50):
     finally:
         conn.close()
 
-#Seed doctor slot master data
-def seed_doctor_slots(days: int = 5, slots_per_day: int = 5):
+def seed_doctor_slots(days: int = 5):
     conn = get_app_connection()
     try:
         with conn.cursor() as cur:
+
+            # 1. Lấy doctor
             cur.execute("SELECT doctor_id, clinic_id FROM doctor ORDER BY doctor_id;")
             doctors = cur.fetchall()
 
@@ -123,25 +124,34 @@ def seed_doctor_slots(days: int = 5, slots_per_day: int = 5):
                 print("No doctors found. Please seed doctor first.")
                 return
 
+            # 2. Lấy slot_code từ template
+            cur.execute("""
+                SELECT slot_code 
+                FROM slot_code_template
+                ORDER BY display_order;
+            """)
+            slot_codes = [row[0] for row in cur.fetchall()]
+
+            if not slot_codes:
+                print("No slot_code_template found.")
+                return
+
             rows = []
             slot_id = 1
-            base_date = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
+            base_date = datetime.now().date()
 
             for doctor_id, clinic_id in doctors:
                 for day_offset in range(days):
                     current_day = base_date + timedelta(days=day_offset)
-                    for slot_index in range(slots_per_day):
-                        start_time = current_day + timedelta(hours=slot_index)
-                        end_time = start_time + timedelta(minutes=45)
 
+                    for slot_code in slot_codes:
                         rows.append(
                             (
                                 slot_id,
                                 doctor_id,
                                 clinic_id,
-                                start_time.date(),
-                                start_time,
-                                end_time,
+                                current_day,
+                                slot_code,
                                 "AVAILABLE",
                                 random.choice(SLOT_TYPES),
                                 1,
@@ -155,8 +165,16 @@ def seed_doctor_slots(days: int = 5, slots_per_day: int = 5):
                 cur,
                 """
                 INSERT INTO doctor_slot (
-                    slot_id, doctor_id, clinic_id, slot_date, start_time, end_time,
-                    slot_status, slot_type, max_capacity, created_at, updated_at
+                    slot_id,
+                    doctor_id,
+                    clinic_id,
+                    slot_date,
+                    slot_code,
+                    slot_status,
+                    slot_type,
+                    max_capacity,
+                    created_at,
+                    updated_at
                 )
                 VALUES %s
                 ON CONFLICT (slot_id) DO NOTHING;
@@ -166,18 +184,25 @@ def seed_doctor_slots(days: int = 5, slots_per_day: int = 5):
 
         conn.commit()
         print(f"Seeded doctor_slot: {len(rows)} rows")
+
     finally:
         conn.close()
 
 def seed_appointments(n: int = 20):
-    # explanation: Seed bảng appointment.
-    # explanation: Chỉ lấy slot AVAILABLE để tạo lịch hẹn ban đầu.
     conn = get_app_connection()
     try:
         with conn.cursor() as cur:
+
+            # 🔥 0. Reset slot về AVAILABLE
+            cur.execute("""
+                UPDATE doctor_slot
+                SET slot_status = 'AVAILABLE';
+            """)
+
+            # 🔥 1. Lấy slot AVAILABLE
             cur.execute(
                 """
-                SELECT slot_id, doctor_id, start_time
+                SELECT slot_id, doctor_id
                 FROM doctor_slot
                 WHERE slot_status = 'AVAILABLE'
                 ORDER BY slot_id
@@ -187,6 +212,7 @@ def seed_appointments(n: int = 20):
             )
             slots = cur.fetchall()
 
+            # 🔥 2. Lấy patients
             cur.execute("SELECT patient_id FROM patient ORDER BY patient_id;")
             patients = [row[0] for row in cur.fetchall()]
 
@@ -195,26 +221,26 @@ def seed_appointments(n: int = 20):
                 return
 
             appointment_rows = []
+            slot_ids_to_update = []
             now = datetime.now()
 
-            for appointment_id, (slot_id, doctor_id, start_time) in enumerate(slots, start=1):
+            # 🔥 3. Tạo appointment (ONLY BOOKED)
+            for appointment_id, (slot_id, doctor_id) in enumerate(slots, start=1):
                 patient_id = random.choice(patients)
-                status = random.choice(["BOOKED", "CONFIRMED", "COMPLETED"])
 
                 appointment_rows.append(
                     (
-                        appointment_id,
-                        f"CONF{appointment_id:06d}",
-                        slot_id,
+                        f"CONF{appointment_id:06d}",  # confirmation_number
+                        slot_id,                     # ✅ đúng index 1
                         doctor_id,
                         patient_id,
-                        status,
+                        "BOOKED",
                         random.choice(BOOKING_CHANNELS),
                         random.choice(APPOINTMENT_TYPES),
                         fake.sentence(nb_words=6),
-                        now - timedelta(hours=random.randint(1, 72)),
+                        now,
                         None,
-                        now if status == "COMPLETED" else None,
+                        None,
                         None,
                         "seed_script",
                         "seed_script",
@@ -223,126 +249,56 @@ def seed_appointments(n: int = 20):
                     )
                 )
 
+                # 🔥 collect đúng slot_id
+                slot_ids_to_update.append(slot_id)
+
+            # 🔥 4. Clear appointment cũ
+            cur.execute("DELETE FROM appointment;")
+
+            # 🔥 5. Insert appointment
             execute_values(
                 cur,
                 """
                 INSERT INTO appointment (
-                    appointment_id, confirmation_number, slot_id, doctor_id, patient_id,
-                    status, booking_channel, appointment_type, reason_for_visit,
-                    booked_at, cancelled_at, completed_at, cancel_reason,
-                    created_by, updated_by, created_at, updated_at
+                    confirmation_number,
+                    slot_id,
+                    doctor_id,
+                    patient_id,
+                    status,
+                    booking_channel,
+                    appointment_type,
+                    reason_for_visit,
+                    booked_at,
+                    cancelled_at,
+                    completed_at,
+                    cancel_reason,
+                    created_by,
+                    updated_by,
+                    created_at,
+                    updated_at
                 )
-                VALUES %s
-                ON CONFLICT (appointment_id) DO NOTHING;
+                VALUES %s;
                 """,
                 appointment_rows,
             )
 
-            # explanation: Những slot đã được dùng để tạo appointment thì chuyển sang BOOKED.
+            # 🔥 6. Update slot → BOOKED (FIX BUG Ở ĐÂY)
             cur.execute(
                 """
                 UPDATE doctor_slot
                 SET slot_status = 'BOOKED',
                     updated_at = NOW()
-                WHERE slot_id IN (
-                    SELECT slot_id
-                    FROM appointment
-                );
-                """
+                WHERE slot_id = ANY(%s);
+                """,
+                (slot_ids_to_update,)  # ✅ đúng slot_id
             )
 
         conn.commit()
         print(f"Seeded appointment: {len(appointment_rows)} rows")
+
     finally:
         conn.close()
-
-def seed_appointments(n: int = 20):
-    # explanation: Seed bảng appointment.
-    # explanation: Chỉ lấy slot AVAILABLE để tạo lịch hẹn ban đầu.
-    conn = get_app_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT slot_id, doctor_id, start_time
-                FROM doctor_slot
-                WHERE slot_status = 'AVAILABLE'
-                ORDER BY slot_id
-                LIMIT %s;
-                """,
-                (n,),
-            )
-            slots = cur.fetchall()
-
-            cur.execute("SELECT patient_id FROM patient ORDER BY patient_id;")
-            patients = [row[0] for row in cur.fetchall()]
-
-            if not slots or not patients:
-                print("No slots or patients found.")
-                return
-
-            appointment_rows = []
-            now = datetime.now()
-
-            for appointment_id, (slot_id, doctor_id, start_time) in enumerate(slots, start=1):
-                patient_id = random.choice(patients)
-                status = random.choice(["BOOKED", "CONFIRMED", "COMPLETED"])
-
-                appointment_rows.append(
-                    (
-                        appointment_id,
-                        f"CONF{appointment_id:06d}",
-                        slot_id,
-                        doctor_id,
-                        patient_id,
-                        status,
-                        random.choice(BOOKING_CHANNELS),
-                        random.choice(APPOINTMENT_TYPES),
-                        fake.sentence(nb_words=6),
-                        now - timedelta(hours=random.randint(1, 72)),
-                        None,
-                        now if status == "COMPLETED" else None,
-                        None,
-                        "seed_script",
-                        "seed_script",
-                        now,
-                        now,
-                    )
-                )
-
-            execute_values(
-                cur,
-                """
-                INSERT INTO appointment (
-                    appointment_id, confirmation_number, slot_id, doctor_id, patient_id,
-                    status, booking_channel, appointment_type, reason_for_visit,
-                    booked_at, cancelled_at, completed_at, cancel_reason,
-                    created_by, updated_by, created_at, updated_at
-                )
-                VALUES %s
-                ON CONFLICT (appointment_id) DO NOTHING;
-                """,
-                appointment_rows,
-            )
-
-            # explanation: Những slot đã được dùng để tạo appointment thì chuyển sang BOOKED.
-            cur.execute(
-                """
-                UPDATE doctor_slot
-                SET slot_status = 'BOOKED',
-                    updated_at = NOW()
-                WHERE slot_id IN (
-                    SELECT slot_id
-                    FROM appointment
-                );
-                """
-            )
-
-        conn.commit()
-        print(f"Seeded appointment: {len(appointment_rows)} rows")
-    finally:
-        conn.close()
-
+        
 def seed_appointment_status_history():
     # explanation: Seed bảng appointment_status_history dựa trên dữ liệu appointment đã có.
     conn = get_app_connection()
@@ -365,7 +321,6 @@ def seed_appointment_status_history():
             for history_id, (appointment_id, status, booked_at) in enumerate(appointments, start=1):
                 rows.append(
                     (
-                        history_id,
                         appointment_id,
                         None,
                         status,
@@ -379,7 +334,7 @@ def seed_appointment_status_history():
                 cur,
                 """
                 INSERT INTO appointment_status_history (
-                    history_id, appointment_id, old_status, new_status, changed_at,
+                    appointment_id, old_status, new_status, changed_at,
                     changed_by, reason
                 )
                 VALUES %s
@@ -420,16 +375,10 @@ def seed_payments():
                 amount_covered = round(random.uniform(0, amount_total * 0.7), 2)
                 amount_patient = round(amount_total - amount_covered, 2)
 
-                if appointment_status == "COMPLETED":
-                    payment_status = "PAID"
-                    paid_datetime = now
-                else:
-                    payment_status = random.choice(["PENDING", "FAILED", "PARTIALLY_PAID"])
-                    paid_datetime = None
-
+                payment_status = "PENDING"
+                paid_datetime = None
                 rows.append(
                     (
-                        payment_id,
                         appointment_id,
                         amount_total,
                         amount_covered,
@@ -448,7 +397,7 @@ def seed_payments():
                 cur,
                 """
                 INSERT INTO payment (
-                    payment_id, appointment_id, amount_total, amount_covered,
+                    appointment_id, amount_total, amount_covered,
                     amount_patient_responsibility, paid_datetime, payment_status,
                     payment_method, transaction_reference, currency, created_at, updated_at
                 )
@@ -474,14 +423,14 @@ def seed_medical_records():
                 """
                 SELECT appointment_id, patient_id, doctor_id
                 FROM appointment
-                WHERE status = 'COMPLETED'
+                WHERE status = 'BOOKED'
                 ORDER BY appointment_id;
                 """
             )
             appointments = cur.fetchall()
 
             if not appointments:
-                print("No COMPLETED appointments found for medical_record.")
+                print("No BOOKED appointments found for medical_record.")
                 return
 
             rows = []
@@ -490,7 +439,6 @@ def seed_medical_records():
             for record_id, (appointment_id, patient_id, doctor_id) in enumerate(appointments, start=1):
                 rows.append(
                     (
-                        record_id,
                         appointment_id,
                         patient_id,
                         doctor_id,
@@ -509,7 +457,7 @@ def seed_medical_records():
                 cur,
                 """
                 INSERT INTO medical_record (
-                    record_id, appointment_id, patient_id, doctor_id, version_number,
+                    appointment_id, patient_id, doctor_id, version_number,
                     diagnosis_note, prescription_note, lab_summary,
                     follow_up_instruction, record_status, created_at, updated_at
                 )

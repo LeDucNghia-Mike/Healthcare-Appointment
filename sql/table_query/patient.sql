@@ -1,0 +1,1 @@
+select last_value from patient_seq;

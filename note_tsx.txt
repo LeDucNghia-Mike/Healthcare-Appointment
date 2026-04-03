@@ -1,0 +1,1830 @@
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\layout.tsx =====
+import "./globals.css";
+import { Toaster } from "react-hot-toast";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <Toaster position="top-right" />
+      </body>
+    </html>
+  );
+}
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\page.tsx =====
+import Button from "@/components/Button";
+
+export default function HomePage() {
+  return (
+    <main className="min-h-screen bg-gray-100 flex flex-col items-center">
+      
+      {/* Title */}
+      <h1 className="text-2xl font-semibold mt-10 mb-16">
+        Healthcare application
+      </h1>
+
+      {/* Buttons */}
+      <div className="flex gap-16">
+        <Button label="Login" href="/auth/login" />
+        <Button label="Register" href="/auth/register" />
+      </div>
+
+    </main>
+  );
+}
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\auth\layout.tsx =====
+"use client";
+
+import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+
+export default function AuthLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const isLogin = pathname.includes("login");
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center bg-white">
+      <div className="w-[350px] space-y-6">
+
+        {/* Toggle between pages */}
+        <div className="flex border rounded-lg overflow-hidden">
+          <button
+            onClick={() => router.push("/auth/login")}
+            className={`w-1/2 py-2 ${
+              isLogin ? "bg-black text-white" : ""
+            }`}
+          >
+            Login
+          </button>
+          <button
+            onClick={() => router.push("/auth/register")}
+            className={`w-1/2 py-2 ${
+              !isLogin ? "bg-black text-white" : ""
+            }`}
+          >
+            Register
+          </button>
+        </div>
+
+        {/* Inject page content */}
+        {children}
+      </div>
+    </main>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\auth\login\page.tsx =====
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export default function LoginPage() {
+  const [role, setRole] = useState<"doctor" | "patient">("patient");
+  const [id, setId] = useState("");
+  const router = useRouter();
+
+  const handleLogin = async () => {
+    try {
+      if (!id) {
+        alert("Please enter ID");
+        return;
+      }
+
+      // 🔥 validate nhẹ
+      if (role === "doctor" && !id.startsWith("DR")) {
+        alert("Doctor ID must be like DR001");
+        return;
+      }
+
+      const res = await fetch(`http://127.0.0.1:8000/auth/login/${role}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          [`${role}_id`]: id,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.message || "Login failed");
+        return;
+      }
+
+      localStorage.setItem("role", role);
+      localStorage.setItem("user_id", id);
+
+      if (role === "doctor") {
+        router.push("/dashboard/doctor/slots");
+      } else {
+        router.push("/dashboard/patient");
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      alert("Server error");
+    }
+  };
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center bg-white">
+      <div className="w-[350px] space-y-6">
+        <div className="flex border rounded-lg overflow-hidden">
+          <button
+            onClick={() => setRole("patient")}
+            className={`w-1/2 py-2 ${role === "patient" ? "bg-black text-white" : ""}`}
+          >
+            Patient
+          </button>
+          <button
+            onClick={() => setRole("doctor")}
+            className={`w-1/2 py-2 ${role === "doctor" ? "bg-black text-white" : ""}`}
+          >
+            Doctor
+          </button>
+        </div>
+
+        <h1 className="text-xl font-semibold text-center">
+          Login as {role} (ID)
+        </h1>
+
+        <input
+          type="text"
+          placeholder={role === "doctor" ? "DR001" : "1"}
+          className="w-full border p-2 rounded"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+        />
+
+        <button
+          onClick={handleLogin}
+          className="w-full bg-black text-white py-2 rounded"
+        >
+          Login
+        </button>
+      </div>
+    </main>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\auth\register\page.tsx =====
+"use client";
+
+import { useState } from "react";
+import { SPECIALTIES, type Specialty } from "@/app/constants/specialties";
+
+export default function RegisterPage() {
+  const [role, setRole] = useState<"doctor" | "patient">("patient");
+
+  const [name, setName] = useState("");
+
+  // doctor
+  const [specialty, setSpecialty] = useState<Specialty>(SPECIALTIES[0]);
+
+  // patient
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [email, setEmail] = useState("");
+  const [insurance, setInsurance] = useState("");
+  const [dob, setDob] = useState("");
+  const [gender, setGender] = useState("");
+
+  const handleRegister = async () => {
+    let payload;
+
+    if (role === "doctor") {
+      payload = {
+        doctor_name: name,
+        specialty,
+        start_working_date: new Date().toISOString().split("T")[0], // 🔥 today
+      };
+    } else {
+      payload = {
+        patient_name: name,
+        phone_number: phone,
+        address,
+        email,
+        insurance_number: insurance,
+        date_of_birth: dob,
+        gender,
+      };
+    }
+
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/${role === "doctor" ? "doctors" : "patients"}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.message || "Register failed");
+        return;
+      }
+
+      alert("Registered successfully!");
+    } catch (err) {
+      console.error(err);
+      alert("Server error");
+    }
+  };
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center bg-white">
+      <div className="w-[350px] space-y-6">
+
+        {/* Toggle */}
+        <div className="flex border rounded-lg overflow-hidden">
+          <button
+            onClick={() => setRole("patient")}
+            className={`w-1/2 py-2 ${role === "patient" ? "bg-black text-white" : ""}`}
+          >
+            Patient
+          </button>
+          <button
+            onClick={() => setRole("doctor")}
+            className={`w-1/2 py-2 ${role === "doctor" ? "bg-black text-white" : ""}`}
+          >
+            Doctor
+          </button>
+        </div>
+
+        <h1 className="text-xl font-semibold text-center">
+          Register as {role}
+        </h1>
+
+        <div className="space-y-4">
+
+          {/* COMMON */}
+          <input
+            type="text"
+            placeholder="Name"
+            className="w-full border p-2 rounded"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+
+          {/* DOCTOR */}
+          {role === "doctor" && (
+            <select
+              className="w-full border p-2 rounded"
+              value={specialty}
+              onChange={(e) => setSpecialty(e.target.value as Specialty)}
+            >
+              {SPECIALTIES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          )}
+
+          {/* PATIENT */}
+          {role === "patient" && (
+            <>
+              <input
+                type="text"
+                placeholder="Phone number"
+                className="w-full border p-2 rounded"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+
+              <input
+                type="text"
+                placeholder="Address"
+                className="w-full border p-2 rounded"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+
+              <input
+                type="email"
+                placeholder="Email"
+                className="w-full border p-2 rounded"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+
+              <input
+                type="text"
+                placeholder="Insurance number"
+                className="w-full border p-2 rounded"
+                value={insurance}
+                onChange={(e) => setInsurance(e.target.value)}
+              />
+
+              <input
+                type="date"
+                className="w-full border p-2 rounded"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+              />
+
+              <input
+                type="text"
+                placeholder="Gender"
+                className="w-full border p-2 rounded"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+              />
+            </>
+          )}
+        </div>
+
+        <button
+          onClick={handleRegister}
+          className="w-full bg-black text-white py-2 rounded"
+        >
+          Register
+        </button>
+
+      </div>
+    </main>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\layout.tsx =====
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+
+  const [mounted, setMounted] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+
+    const r = localStorage.getItem("role");
+    const id = localStorage.getItem("user_id");
+
+    if (!r || !id) {
+      router.push("/auth/login");
+    } else {
+      setRole(r);
+      setUserId(id);
+    }
+  }, [router]);
+
+  // ❗ QUAN TRỌNG: tránh mismatch
+  if (!mounted || !role || !userId) return null;
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <div className="flex justify-between items-center p-4 bg-white shadow">
+        <div className="font-medium">
+          {role === "doctor" ? "Doctor" : "Patient"} ID: {userId}
+        </div>
+
+        <button
+          onClick={() => {
+            localStorage.clear();
+            router.push("/auth/login");
+          }}
+          className="px-4 py-2 bg-black text-white rounded"
+        >
+          Logout
+        </button>
+      </div>
+
+      <div className="p-6">{children}</div>
+    </div>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\layout.tsx =====
+"use client";
+
+import { useRouter, usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+
+type Doctor = {
+  doctor_id: number;
+  doctor_name: string;
+  specialty: string;
+};
+
+export default function DoctorLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const [mounted, setMounted] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [doctor, setDoctor] = useState<Doctor | null>(null);
+  const [loadingDoctor, setLoadingDoctor] = useState(true);
+
+  // 🔐 Effect 1: Auth + lấy userId
+  useEffect(() => {
+    setMounted(true);
+
+    const role = localStorage.getItem("role");
+    const id = localStorage.getItem("user_id");
+
+    if (!role || !id || role !== "doctor") {
+      router.replace("/auth/login");
+      return;
+    }
+
+    setUserId(id);
+  }, [router]);
+
+  // 📡 Effect 2: fetch doctor (🔥 đúng dependency)
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchDoctor = async () => {
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:8000/doctors/${userId}`, // ⚠️ nhớ đúng endpoint
+        );
+
+        if (!res.ok) {
+          console.error("Doctor fetch failed:", res.status);
+          return;
+        }
+
+        const data: Doctor = await res.json();
+        console.log("Doctor data:", data);
+
+        setDoctor(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingDoctor(false);
+      }
+    };
+
+    fetchDoctor();
+  }, [userId]);
+
+  // 🔒 tránh hydration mismatch
+  if (!mounted || !userId) return null;
+
+  return (
+    <div className="flex gap-2">
+      <button
+        onClick={() => router.push("/dashboard/doctor/slots")}
+        className={`px-4 py-1 rounded ${
+          pathname.includes("slots") ? "bg-black text-white" : "bg-gray-200"
+        }`}
+      >
+        Manage Slots
+      </button>
+
+      <button
+        onClick={() => router.push("/dashboard/doctor/history")}
+        className={`px-4 py-1 rounded ${
+          pathname.includes("history") ? "bg-black text-white" : "bg-gray-200"
+        }`}
+      >
+        Booking History
+      </button>
+    </div>
+  );
+}
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\page.tsx =====
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function DoctorPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/dashboard/doctor/slots");
+  }, [router]);
+
+  return null;
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\history\page.tsx =====
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Appointment = {
+  patient_id: number;
+  slot_id: string;
+  slot_date: string;
+  slot_code: string;
+};
+
+export default function DoctorHistoryPage() {
+  const [data, setData] = useState<Appointment[]>([]);
+  const [doctorId] = useState(() => localStorage.getItem("user_id"));
+
+  useEffect(() => {
+    if (!doctorId) return;
+
+    const fetchData = async () => {
+      const res = await fetch(
+        `http://127.0.0.1:8000/appointments/appointments/doctor/${doctorId}`
+      );
+
+      const d = await res.json();
+
+      if (Array.isArray(d)) {
+        setData(d);
+      }
+    };
+
+    fetchData();
+  }, [doctorId]);
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">Patient Bookings</h1>
+
+      {data.map((item, idx) => (
+        <div key={idx} className="card">
+          <div><b>Date:</b> {item.slot_date}</div>
+          <div><b>Slot:</b> {item.slot_code}</div>
+          <div><b>Patient:</b> {item.patient_id}</div>
+        </div>
+      ))}
+    </div>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\slots\page.tsx =====
+"use client";
+
+import { useEffect, useState } from "react";
+import { SLOT_MAP } from "@/app/constants/slots";
+
+type SlotStatus = "AVAILABLE" | "BOOKED" | "BLOCKED";
+
+type SlotResponse = {
+  slot_code: string;
+  slot_status: SlotStatus | null;
+  patient_id?: number | null;
+};
+const getToday = () => {
+  return new Date().toISOString().split("T")[0];
+};
+
+export default function SlotPage() {
+  const [date, setDate] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+
+    const saved = localStorage.getItem("doctor_slot_date");
+
+    return saved ? saved : getToday();
+  });
+  const [slots, setSlots] = useState<Record<string, SlotStatus>>({});
+  const [userId, setUserId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("user_id");
+    }
+    return null;
+  });
+  const [patientMap, setPatientMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (date) {
+      localStorage.setItem("doctor_slot_date", date);
+    }
+  }, [date]);
+  // 📡 fetch slots
+  useEffect(() => {
+    if (!date || !userId) return;
+
+    const fetchSlots = async () => {
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:8000/slots/doctor/slots/${userId}/${date}`,
+        );
+
+        if (!res.ok) {
+          setSlots({});
+          return;
+        }
+
+        const data: SlotResponse[] = await res.json();
+
+        const mapped: Record<string, SlotStatus> = {};
+        const patientTemp: Record<string, string> = {};
+
+        for (const s of data) {
+          if (s.slot_status) {
+            mapped[s.slot_code] = s.slot_status;
+          }
+
+          if (s.slot_status === "BOOKED") {
+            patientTemp[s.slot_code] = String(s.patient_id ?? "No patient");
+          }
+        }
+
+        setSlots(mapped);
+        setPatientMap(patientTemp); // ✅ không reset riêng nữa
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchSlots();
+  }, [date, userId]);
+
+  // 📅 check past + today
+  const isPastOrToday = (d: string) => {
+    const today = new Date();
+    const selected = new Date(d);
+
+    today.setHours(0, 0, 0, 0);
+    selected.setHours(0, 0, 0, 0);
+
+    return selected <= today;
+  };
+
+  // 🔄 update slot
+  const handleUpdate = async (slot: string, value: SlotStatus) => {
+    if (!date || !userId) return;
+
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/slots/doctor/slot/${userId}/${date}/${slot}/${value}`,
+        { method: "PUT" },
+      );
+
+      if (!res.ok) {
+        alert("Update failed");
+        return;
+      }
+
+      setSlots((prev) => ({
+        ...prev,
+        [slot]: value,
+      }));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 🔥 VIEW PATIENT
+  // const handleViewPatient = async (slot: string) => {
+  //   if (!userId || !date) return;
+
+  //   try {
+  //     const res = await fetch(
+  //       `http://127.0.0.1:8000/slots/doctor/${userId}/${date}/${slot}/patient`,
+  //     );
+
+  //     const data = await res.json();
+
+  //     setPatientMap((prev) => ({
+  //       ...prev,
+  //       [slot]: String(data?.patient_id ?? "No patient"),
+  //     }));
+  //   } catch (err) {
+  //     console.error(err);
+  //   }
+  // };
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Manage Slots</h1>
+
+      <input
+        type="date"
+        className="border p-2"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+      />
+
+      <div className="grid grid-cols-2 gap-4">
+        {Object.entries(SLOT_MAP).map(([slot, time]) => {
+          const status = slots[slot];
+
+          // ❌ NOT AVAILABLE
+          if (!status) {
+            return (
+              <div key={slot} className="border p-3 bg-gray-100">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div className="text-red-500">NOT AVAILABLE</div>
+              </div>
+            );
+          }
+
+          // 🔥 BOOKED
+          if (status === "BOOKED") {
+            return (
+              <div key={slot} className="border p-3 bg-yellow-50 space-y-2">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div className="text-red-500 font-bold">BOOKED</div>
+
+                {/* <button
+                  onClick={() => handleViewPatient(slot)}
+                  className="text-blue-600 underline"
+                >
+                  View Patient
+                </button> */}
+
+                {patientMap[slot] && <div>Patient: {patientMap[slot]}</div>}
+              </div>
+            );
+          }
+
+          // ⛔ PAST
+          if (isPastOrToday(date)) {
+            return (
+              <div key={slot} className="border p-3 bg-gray-100">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div>{status}</div>
+                <div className="text-gray-500">LOCKED</div>
+              </div>
+            );
+          }
+
+          // ✅ NORMAL
+          return (
+            <div key={slot} className="border p-3">
+              <div>{slot}</div>
+              <div>{time}</div>
+              <div>{status}</div>
+
+              <select
+                value={status}
+                onChange={(e) =>
+                  handleUpdate(slot, e.target.value as SlotStatus)
+                }
+              >
+                <option value="AVAILABLE">Available</option>
+                <option value="BLOCKED">Blocked</option>
+              </select>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\patient\layout.tsx =====
+"use client";
+
+import { useRouter, usePathname } from "next/navigation";
+
+export default function PatientLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* HEADER */}
+      <div className="bg-white border-b px-6 py-4 flex justify-between items-center">
+        <h1 className="text-lg font-semibold text-gray-700">
+          Patient Dashboard
+        </h1>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push("/dashboard/patient")}
+            className={`btn ${
+              pathname === "/dashboard/patient"
+                ? "btn-primary"
+                : "btn-secondary"
+            }`}
+          >
+            Home
+          </button>
+
+          <button
+            onClick={() => router.push("/dashboard/patient/history")}
+            className={`btn ${
+              pathname.includes("history") ? "btn-primary" : "btn-secondary"
+            }`}
+          >
+            History
+          </button>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+      <div className="p-6">{children}</div>
+    </div>
+  );
+}
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\patient\page.tsx =====
+"use client";
+
+import { useState } from "react";
+import { SPECIALTIES } from "@/app/constants/specialties";
+import { useRouter } from "next/navigation";
+
+export default function PatientPage() {
+  type Doctor = {
+    doctor_id: number;
+    doctor_name: string;
+    specialty: string;
+  };
+
+  const [selectedSpecialty, setSelectedSpecialty] = useState("");
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const router = useRouter();
+
+  const handleConfirm = async () => {
+    if (!selectedSpecialty) {
+      alert("Please select a specialty");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const res = await fetch(
+        `http://127.0.0.1:8000/doctors/specialty/${encodeURIComponent(selectedSpecialty)}`
+      );
+
+      const data: Doctor[] = await res.json();
+
+      if (!res.ok) {
+        setError("Failed to fetch doctors");
+        return;
+      }
+
+      setDoctors(data);
+    } catch (err) {
+      console.error(err);
+      setError("Server error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBook = (doctorId: number) => {
+    localStorage.setItem("selected_doctor_id", String(doctorId));
+    router.push("/dashboard/patient/book");
+  };
+
+  return (
+    <div className="p-6">
+      <h1 className="text-xl font-semibold mb-4">
+        Select your symptom / specialty
+      </h1>
+
+      <select
+        className="border p-2 rounded mr-3"
+        value={selectedSpecialty}
+        onChange={(e) => setSelectedSpecialty(e.target.value)}
+      >
+        <option value="">-- Choose --</option>
+        {SPECIALTIES.map((spec) => (
+          <option key={spec} value={spec}>
+            {spec}
+          </option>
+        ))}
+      </select>
+
+      <button
+        onClick={handleConfirm}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Confirm
+      </button>
+
+      {loading && <p className="mt-4">Loading...</p>}
+      {error && <p className="mt-4 text-red-500">{error}</p>}
+
+      <div className="mt-6 space-y-3">
+        {doctors.map((doc) => (
+          <div key={doc.doctor_id} className="border p-4 rounded shadow-sm">
+            <p><strong>ID:</strong> {doc.doctor_id}</p>
+            <p><strong>Name:</strong> {doc.doctor_name}</p>
+            <p><strong>Specialty:</strong> {doc.specialty}</p>
+
+            <button
+              onClick={() => handleBook(doc.doctor_id)}
+              className="mt-2 bg-green-500 text-white px-3 py-1 rounded"
+            >
+              Book
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\patient\book\page.tsx =====
+"use client";
+
+import { useEffect, useState } from "react";
+import { SLOT_MAP } from "@/app/constants/slots";
+type SlotStatus = "AVAILABLE" | "BOOKED" | "BLOCKED";
+const getToday = () => {
+  return new Date().toISOString().split("T")[0];
+};
+export default function PatientBookingPage() {
+  const [doctorId, setDoctorId] = useState<string | null>(null);
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const [date, setDate] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+
+    const saved = localStorage.getItem("patient_selected_date");
+
+    return saved ? saved : getToday();
+  });
+  const [slots, setSlots] = useState<Record<string, SlotStatus>>({});
+  const [slotOwners, setSlotOwners] = useState<Record<string, string>>({});
+  const [slotIds, setSlotIds] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  // =========================
+  // INIT USER DATA
+  // =========================
+  useEffect(() => {
+    setDoctorId(localStorage.getItem("selected_doctor_id"));
+    setPatientId(localStorage.getItem("user_id"));
+  }, []);
+
+  // =========================
+  // MIN DATE (>= TODAY + 2)
+  // =========================
+  const getTwoDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+
+    return d.toISOString().split("T")[0];
+  };
+  useEffect(() => {
+    if (date) {
+      localStorage.setItem("patient_selected_date", date);
+    }
+  }, [date]);
+  // =========================
+  // FETCH SLOTS
+  // =========================
+  useEffect(() => {
+    if (!doctorId || !date) return;
+
+    const fetchSlots = async () => {
+      try {
+        setLoading(true);
+
+        const res = await fetch(
+          `http://127.0.0.1:8000/slots/doctor/slots/${doctorId}/${date}`,
+        );
+
+        const data = await res.json();
+
+        const mapped: Record<string, SlotStatus> = {};
+        const ownerMap: Record<string, string> = {};
+        const idMap: Record<string, string> = {};
+
+        for (const s of data) {
+          mapped[s.slot_code] = s.slot_status;
+
+          if (s.slot_id) {
+            idMap[s.slot_code] = s.slot_id;
+          }
+
+          if (s.slot_status === "BOOKED") {
+            ownerMap[s.slot_code] = String(s.patient_id || "");
+          }
+        }
+
+        setSlots(mapped);
+        setSlotOwners(ownerMap);
+        setSlotIds(idMap);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSlots();
+  }, [doctorId, date]);
+
+  // =========================
+  // VALIDATE DATE
+  // =========================
+  const isPastOrToday = (d: string) => {
+    const today = new Date();
+    const selected = new Date(d);
+
+    today.setHours(0, 0, 0, 0);
+    selected.setHours(0, 0, 0, 0);
+
+    return selected <= today;
+  };
+
+  const isInvalidDate = date ? isPastOrToday(date) : true;
+
+  // =========================
+  // BOOK SLOT
+  // =========================
+  const handleBook = async (slot: string) => {
+    if (!doctorId || !patientId || !date) return;
+
+    if (isInvalidDate) {
+      alert("Invalid date");
+      return;
+    }
+
+    const slotId = slotIds[slot];
+
+    if (!slotId) {
+      alert("Slot not found");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/appointments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slot_id: slotId,
+          patient_id: Number(patientId),
+        }),
+      });
+
+      if (!res.ok) {
+        alert("Booking failed");
+        return;
+      }
+
+      const result = await res.json();
+
+      alert(`Booked successfully!\nTransaction: ${result.booking_ref}`);
+
+      // update UI ngay lập tức
+      setSlots((prev) => ({ ...prev, [slot]: "BOOKED" }));
+      setSlotOwners((prev) => ({ ...prev, [slot]: patientId! }));
+    } catch (err) {
+      console.error(err);
+      alert("Server error");
+    }
+  };
+
+  // =========================
+  // CANCEL SLOT
+  // =========================
+  const handleCancel = async (slot: string) => {
+    if (!doctorId || !patientId || !date) return;
+
+    const slotId = slotIds[slot];
+
+    if (!slotId) {
+      alert("Slot not found");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/appointments/cancel", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slot_id: slotId,
+          patient_id: Number(patientId),
+        }),
+      });
+
+      if (!res.ok) {
+        alert("Cancel failed");
+        return;
+      }
+
+      alert("Cancelled");
+
+      setSlots((prev) => ({ ...prev, [slot]: "AVAILABLE" }));
+      setSlotOwners((prev) => {
+        const copy = { ...prev };
+        delete copy[slot];
+        return copy;
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Server error");
+    }
+  };
+
+  if (!doctorId) return <div>Loading doctor...</div>;
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    
+    <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <h1 className="text-xl font-semibold">Booking Doctor ID: {doctorId}</h1>
+
+      <input
+        type="date"
+        className="border p-2 rounded"
+        value={date}
+        min={getTwoDate()}
+        onChange={(e) => setDate(e.target.value)}
+      />
+
+      {loading && <p>Loading slots...</p>}
+
+      <div className="grid grid-cols-2 gap-4">
+        {Object.entries(SLOT_MAP).map(([slot, time]) => {
+          const status = slots[slot];
+
+          if (!status) {
+            return (
+              <div key={slot} className="border p-3 bg-gray-100 rounded">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div className="text-red-500">NOT AVAILABLE</div>
+              </div>
+            );
+          }
+
+          if (status === "BOOKED") {
+            const isMine = slotOwners[slot] === patientId;
+
+            if (isMine) {
+              return (
+                <div key={slot} className="border p-3 bg-pink-50 rounded">
+                  <div>{slot}</div>
+                  <div>{time}</div>
+                  <div className="text-pink-600 font-bold">YOUR BOOKING</div>
+
+                  <button
+                    onClick={() => handleCancel(slot)}
+                    className="mt-2 bg-pink-500 text-white px-2 py-1 rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div key={slot} className="border p-3 bg-yellow-50 rounded">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div className="text-red-500 font-bold">BOOKED</div>
+              </div>
+            );
+          }
+
+          if (status === "BLOCKED") {
+            return (
+              <div key={slot} className="border p-3 bg-gray-200 rounded">
+                <div>{slot}</div>
+                <div>{time}</div>
+                <div className="text-gray-500">BLOCKED</div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={slot} className="border p-3 bg-green-50 rounded">
+              <div>{slot}</div>
+              <div>{time}</div>
+              <div className="text-green-600 font-bold">AVAILABLE</div>
+
+              <button
+                disabled={isInvalidDate}
+                onClick={() => handleBook(slot)}
+                className="mt-2 bg-blue-500 text-white px-2 py-1 rounded"
+              >
+                Book
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\patient\history\page.tsx =====
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+type Appointment = {
+  doctor_id: string;
+  slot_date: string;
+  slot_code: string;
+  booking_ref: string;
+};
+
+export default function PatientHistoryPage() {
+  const [data, setData] = useState<Appointment[]>([]);
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const id = localStorage.getItem("user_id");
+    setPatientId(id);
+  }, []);
+
+  useEffect(() => {
+    if (!patientId) return;
+
+    const fetchData = async () => {
+      const res = await fetch(
+        `http://127.0.0.1:8000/appointments/appointments/patient/${patientId}`
+      );
+
+      const d = await res.json();
+      setData(d);
+    };
+
+    fetchData();
+  }, [patientId]);
+
+  const handleClick = (appt: Appointment) => {
+    // 👉 redirect sang booking page + set date
+    localStorage.setItem("patient_selected_date", appt.slot_date);
+    localStorage.setItem("selected_doctor_id", appt.doctor_id);
+
+    router.push("/dashboard/patient/book");
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto p-6 space-y-4">
+      <h1 className="text-xl font-semibold">My Appointments</h1>
+
+      {data.map((appt, idx) => (
+        <div
+          key={idx}
+          className="border p-3 rounded bg-blue-50 cursor-pointer hover:bg-blue-100"
+          onClick={() => handleClick(appt)}
+        >
+          <div><b>Date:</b> {appt.slot_date}</div>
+          <div><b>Slot:</b> {appt.slot_code}</div>
+          <div><b>Doctor:</b> {appt.doctor_id}</div>
+        </div>
+      ))}
+    </div>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\components\Button.tsx =====
+"use client";
+
+import { useRouter } from "next/navigation";
+
+type ButtonProps = {
+  label: string;
+  href: string;
+};
+
+export default function Button({ label, href }: ButtonProps) {
+  const router = useRouter();
+
+  return (
+    <button
+      onClick={() => router.push(href)}
+      className="
+        w-64 h-40
+        bg-blue-500 text-white
+        rounded-3xl
+        flex items-center justify-center
+        text-lg font-medium
+        hover:bg-blue-600 transition
+      "
+    >
+      {label}
+    </button>
+  );
+}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\components\FormInput.tsx =====
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\components\Navbar.tsx =====
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\checkmark.tsx =====
+import { styled, keyframes } from 'goober';
+
+const circleAnimation = keyframes`
+from {
+  transform: scale(0) rotate(45deg);
+	opacity: 0;
+}
+to {
+  transform: scale(1) rotate(45deg);
+	opacity: 1;
+}`;
+
+const checkmarkAnimation = keyframes`
+0% {
+	height: 0;
+	width: 0;
+	opacity: 0;
+}
+40% {
+  height: 0;
+	width: 6px;
+	opacity: 1;
+}
+100% {
+  opacity: 1;
+  height: 10px;
+}`;
+
+export interface CheckmarkTheme {
+  primary?: string;
+  secondary?: string;
+}
+
+export const CheckmarkIcon = styled('div')<CheckmarkTheme>`
+  width: 20px;
+  opacity: 0;
+  height: 20px;
+  border-radius: 10px;
+  background: ${(p) => p.primary || '#61d345'};
+  position: relative;
+  transform: rotate(45deg);
+
+  animation: ${circleAnimation} 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)
+    forwards;
+  animation-delay: 100ms;
+  &:after {
+    content: '';
+    box-sizing: border-box;
+    animation: ${checkmarkAnimation} 0.2s ease-out forwards;
+    opacity: 0;
+    animation-delay: 200ms;
+    position: absolute;
+    border-right: 2px solid;
+    border-bottom: 2px solid;
+    border-color: ${(p) => p.secondary || '#fff'};
+    bottom: 6px;
+    left: 6px;
+    height: 10px;
+    width: 6px;
+  }
+`;
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\error.tsx =====
+import { styled, keyframes } from 'goober';
+
+const circleAnimation = keyframes`
+from {
+  transform: scale(0) rotate(45deg);
+	opacity: 0;
+}
+to {
+ transform: scale(1) rotate(45deg);
+  opacity: 1;
+}`;
+
+const firstLineAnimation = keyframes`
+from {
+  transform: scale(0);
+  opacity: 0;
+}
+to {
+  transform: scale(1);
+  opacity: 1;
+}`;
+
+const secondLineAnimation = keyframes`
+from {
+  transform: scale(0) rotate(90deg);
+	opacity: 0;
+}
+to {
+  transform: scale(1) rotate(90deg);
+	opacity: 1;
+}`;
+
+export interface ErrorTheme {
+  primary?: string;
+  secondary?: string;
+}
+
+export const ErrorIcon = styled('div')<ErrorTheme>`
+  width: 20px;
+  opacity: 0;
+  height: 20px;
+  border-radius: 10px;
+  background: ${(p) => p.primary || '#ff4b4b'};
+  position: relative;
+  transform: rotate(45deg);
+
+  animation: ${circleAnimation} 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)
+    forwards;
+  animation-delay: 100ms;
+
+  &:after,
+  &:before {
+    content: '';
+    animation: ${firstLineAnimation} 0.15s ease-out forwards;
+    animation-delay: 150ms;
+    position: absolute;
+    border-radius: 3px;
+    opacity: 0;
+    background: ${(p) => p.secondary || '#fff'};
+    bottom: 9px;
+    left: 4px;
+    height: 2px;
+    width: 12px;
+  }
+
+  &:before {
+    animation: ${secondLineAnimation} 0.15s ease-out forwards;
+    animation-delay: 180ms;
+    transform: rotate(90deg);
+  }
+`;
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\loader.tsx =====
+import { styled, keyframes } from 'goober';
+
+const rotate = keyframes`
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+`;
+
+export interface LoaderTheme {
+  primary?: string;
+  secondary?: string;
+}
+
+export const LoaderIcon = styled('div')<LoaderTheme>`
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid;
+  border-radius: 100%;
+  border-color: ${(p) => p.secondary || '#e0e0e0'};
+  border-right-color: ${(p) => p.primary || '#616161'};
+  animation: ${rotate} 1s linear infinite;
+`;
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\toast-bar.tsx =====
+import * as React from 'react';
+import { styled, keyframes } from 'goober';
+
+import { Toast, ToastPosition, resolveValue, Renderable } from '../core/types';
+import { ToastIcon } from './toast-icon';
+import { prefersReducedMotion } from '../core/utils';
+
+const enterAnimation = (factor: number) => `
+0% {transform: translate3d(0,${factor * -200}%,0) scale(.6); opacity:.5;}
+100% {transform: translate3d(0,0,0) scale(1); opacity:1;}
+`;
+
+const exitAnimation = (factor: number) => `
+0% {transform: translate3d(0,0,-1px) scale(1); opacity:1;}
+100% {transform: translate3d(0,${factor * -150}%,-1px) scale(.6); opacity:0;}
+`;
+
+const fadeInAnimation = `0%{opacity:0;} 100%{opacity:1;}`;
+const fadeOutAnimation = `0%{opacity:1;} 100%{opacity:0;}`;
+
+const ToastBarBase = styled('div')`
+  display: flex;
+  align-items: center;
+  background: #fff;
+  color: #363636;
+  line-height: 1.3;
+  will-change: transform;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1), 0 3px 3px rgba(0, 0, 0, 0.05);
+  max-width: 350px;
+  pointer-events: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+`;
+
+const Message = styled('div')`
+  display: flex;
+  justify-content: center;
+  margin: 4px 10px;
+  color: inherit;
+  flex: 1 1 auto;
+  white-space: pre-line;
+`;
+
+interface ToastBarProps {
+  toast: Toast;
+  position?: ToastPosition;
+  style?: React.CSSProperties;
+  children?: (components: {
+    icon: Renderable;
+    message: Renderable;
+  }) => Renderable;
+}
+
+const getAnimationStyle = (
+  position: ToastPosition,
+  visible: boolean
+): React.CSSProperties => {
+  const top = position.includes('top');
+  const factor = top ? 1 : -1;
+
+  const [enter, exit] = prefersReducedMotion()
+    ? [fadeInAnimation, fadeOutAnimation]
+    : [enterAnimation(factor), exitAnimation(factor)];
+
+  return {
+    animation: visible
+      ? `${keyframes(enter)} 0.35s cubic-bezier(.21,1.02,.73,1) forwards`
+      : `${keyframes(exit)} 0.4s forwards cubic-bezier(.06,.71,.55,1)`,
+  };
+};
+
+export const ToastBar: React.FC<ToastBarProps> = React.memo(
+  ({ toast, position, style, children }) => {
+    const animationStyle: React.CSSProperties = toast.height
+      ? getAnimationStyle(
+          toast.position || position || 'top-center',
+          toast.visible
+        )
+      : { opacity: 0 };
+
+    const icon = <ToastIcon toast={toast} />;
+    const message = (
+      <Message {...toast.ariaProps}>
+        {resolveValue(toast.message, toast)}
+      </Message>
+    );
+
+    return (
+      <ToastBarBase
+        className={toast.className}
+        style={{
+          ...animationStyle,
+          ...style,
+          ...toast.style,
+        }}
+      >
+        {typeof children === 'function' ? (
+          children({
+            icon,
+            message,
+          })
+        ) : (
+          <>
+            {icon}
+            {message}
+          </>
+        )}
+      </ToastBarBase>
+    );
+  }
+);
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\toast-icon.tsx =====
+import * as React from 'react';
+import { styled, keyframes } from 'goober';
+
+import { Toast } from '../core/types';
+import { ErrorIcon, ErrorTheme } from './error';
+import { LoaderIcon, LoaderTheme } from './loader';
+import { CheckmarkIcon, CheckmarkTheme } from './checkmark';
+
+const StatusWrapper = styled('div')`
+  position: absolute;
+`;
+
+const IndicatorWrapper = styled('div')`
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 20px;
+  min-height: 20px;
+`;
+
+const enter = keyframes`
+from {
+  transform: scale(0.6);
+  opacity: 0.4;
+}
+to {
+  transform: scale(1);
+  opacity: 1;
+}`;
+
+export const AnimatedIconWrapper = styled('div')`
+  position: relative;
+  transform: scale(0.6);
+  opacity: 0.4;
+  min-width: 20px;
+  animation: ${enter} 0.3s 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.275)
+    forwards;
+`;
+
+export type IconThemes = Partial<{
+  success: CheckmarkTheme;
+  error: ErrorTheme;
+  loading: LoaderTheme;
+}>;
+
+export const ToastIcon: React.FC<{
+  toast: Toast;
+}> = ({ toast }) => {
+  const { icon, type, iconTheme } = toast;
+  if (icon !== undefined) {
+    if (typeof icon === 'string') {
+      return <AnimatedIconWrapper>{icon}</AnimatedIconWrapper>;
+    } else {
+      return icon;
+    }
+  }
+
+  if (type === 'blank') {
+    return null;
+  }
+
+  return (
+    <IndicatorWrapper>
+      <LoaderIcon {...iconTheme} />
+      {type !== 'loading' && (
+        <StatusWrapper>
+          {type === 'error' ? (
+            <ErrorIcon {...iconTheme} />
+          ) : (
+            <CheckmarkIcon {...iconTheme} />
+          )}
+        </StatusWrapper>
+      )}
+    </IndicatorWrapper>
+  );
+};
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\node_modules\react-hot-toast\src\components\toaster.tsx =====
+import { css, setup } from 'goober';
+import * as React from 'react';
+import {
+  resolveValue,
+  ToasterProps,
+  ToastPosition,
+  ToastWrapperProps,
+} from '../core/types';
+import { useToaster } from '../core/use-toaster';
+import { prefersReducedMotion } from '../core/utils';
+import { ToastBar } from './toast-bar';
+
+setup(React.createElement);
+
+const ToastWrapper = ({
+  id,
+  className,
+  style,
+  onHeightUpdate,
+  children,
+}: ToastWrapperProps) => {
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) {
+        const updateHeight = () => {
+          const height = el.getBoundingClientRect().height;
+          onHeightUpdate(id, height);
+        };
+        updateHeight();
+        new MutationObserver(updateHeight).observe(el, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+      }
+    },
+    [id, onHeightUpdate]
+  );
+
+  return (
+    <div ref={ref} className={className} style={style}>
+      {children}
+    </div>
+  );
+};
+
+const getPositionStyle = (
+  position: ToastPosition,
+  offset: number
+): React.CSSProperties => {
+  const top = position.includes('top');
+  const verticalStyle: React.CSSProperties = top ? { top: 0 } : { bottom: 0 };
+  const horizontalStyle: React.CSSProperties = position.includes('center')
+    ? {
+        justifyContent: 'center',
+      }
+    : position.includes('right')
+    ? {
+        justifyContent: 'flex-end',
+      }
+    : {};
+  return {
+    left: 0,
+    right: 0,
+    display: 'flex',
+    position: 'absolute',
+    transition: prefersReducedMotion()
+      ? undefined
+      : `all 230ms cubic-bezier(.21,1.02,.73,1)`,
+    transform: `translateY(${offset * (top ? 1 : -1)}px)`,
+    ...verticalStyle,
+    ...horizontalStyle,
+  };
+};
+
+const activeClass = css`
+  z-index: 9999;
+  > * {
+    pointer-events: auto;
+  }
+`;
+
+const DEFAULT_OFFSET = 16;
+
+export const Toaster: React.FC<ToasterProps> = ({
+  reverseOrder,
+  position = 'top-center',
+  toastOptions,
+  gutter,
+  children,
+  toasterId,
+  containerStyle,
+  containerClassName,
+}) => {
+  const { toasts, handlers } = useToaster(toastOptions, toasterId);
+
+  return (
+    <div
+      data-rht-toaster={toasterId || ''}
+      style={{
+        position: 'fixed',
+        zIndex: 9999,
+        top: DEFAULT_OFFSET,
+        left: DEFAULT_OFFSET,
+        right: DEFAULT_OFFSET,
+        bottom: DEFAULT_OFFSET,
+        pointerEvents: 'none',
+        ...containerStyle,
+      }}
+      className={containerClassName}
+      onMouseEnter={handlers.startPause}
+      onMouseLeave={handlers.endPause}
+    >
+      {toasts.map((t) => {
+        const toastPosition = t.position || position;
+        const offset = handlers.calculateOffset(t, {
+          reverseOrder,
+          gutter,
+          defaultPosition: position,
+        });
+        const positionStyle = getPositionStyle(toastPosition, offset);
+
+        return (
+          <ToastWrapper
+            id={t.id}
+            key={t.id}
+            onHeightUpdate={handlers.updateHeight}
+            className={t.visible ? activeClass : ''}
+            style={positionStyle}
+          >
+            {t.type === 'custom' ? (
+              resolveValue(t.message, t)
+            ) : children ? (
+              children(t)
+            ) : (
+              <ToastBar toast={t} position={toastPosition} />
+            )}
+          </ToastWrapper>
+        );
+      })}
+    </div>
+  );
+};
+.

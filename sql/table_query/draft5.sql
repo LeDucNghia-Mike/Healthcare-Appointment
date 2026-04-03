@@ -1,0 +1,1 @@
+select last_value from appointment_seq;

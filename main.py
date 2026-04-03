@@ -1,5 +1,6 @@
 from app.create_schema import create_database, create_schema
-from app.seed_master_data import seed_all
+# from app.seed_master_data import seed_all
+from app.seeds.seed_total import seed_all
 from app.register_connector import wait_for_debezium, register_connector
 
 
@@ -14,10 +15,10 @@ def main():
     seed_all()
 
     # explanation: Bước 4 chờ Debezium Connect sẵn sàng.
-    wait_for_debezium()
+    # wait_for_debezium()
 
     # explanation: Bước 5 đăng ký connector CDC.
-    register_connector()
+    # register_connector()
 
     print("Setup completed successfully.")
 

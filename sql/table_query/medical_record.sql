@@ -1,0 +1,1 @@
+select last_value from medical_record_seq;

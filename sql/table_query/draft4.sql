@@ -1,0 +1,1 @@
+select * from appointment where patient_id = 80;

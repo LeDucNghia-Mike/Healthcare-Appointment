@@ -2,29 +2,116 @@
 -- 1) CREATE DATABASE
 -- =========================================
 -- CREATE DATABASE healthcare_booking_realtime;
-
 -- Nếu dùng psql thì connect vào DB:
 -- \c healthcare_booking_realtime;
 
-
+-- CREATE EXTENSION IF NOT EXISTS "pg_cron";
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'user_role_enum'
+) THEN CREATE TYPE user_role_enum AS ENUM ('ADMIN', 'DOCTOR', 'PATIENT');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'employment_status_enum'
+) THEN CREATE TYPE employment_status_enum AS ENUM ('ACTIVE', 'INACTIVE', 'ON_LEAVE');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'patient_status_enum'
+) THEN CREATE TYPE patient_status_enum AS ENUM ('ACTIVE', 'INACTIVE');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'slot_status_enum'
+) THEN CREATE TYPE slot_status_enum AS ENUM ('AVAILABLE', 'BOOKED', 'BLOCKED', 'CANCELLED');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'slot_type_enum'
+) THEN CREATE TYPE slot_type_enum AS ENUM ('CONSULTATION', 'FOLLOW_UP', 'TEST', 'EMERGENCY');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'appointment_status_enum'
+) THEN CREATE TYPE appointment_status_enum AS ENUM (
+    'BOOKED',
+    'CONFIRMED',
+    'CANCELLED',
+    'COMPLETED',
+    'NO_SHOW'
+);
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'booking_channel_enum'
+) THEN CREATE TYPE booking_channel_enum AS ENUM ('WEB', 'MOBILE', 'PHONE', 'WALK_IN');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'appointment_type_enum'
+) THEN CREATE TYPE appointment_type_enum AS ENUM ('NEW', 'FOLLOW_UP', 'CHECKUP');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'payment_status_enum'
+) THEN CREATE TYPE payment_status_enum AS ENUM (
+    'PENDING',
+    'PAID',
+    'FAILED',
+    'REFUNDED',
+    'PARTIALLY_PAID'
+);
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'record_status_enum'
+) THEN CREATE TYPE record_status_enum AS ENUM ('DRAFT', 'FINAL', 'AMENDED');
+END IF;
+END $$;
 -- =========================================
--- 2) ENUM TYPES
+-- 3) TABLE: slot_code_template
 -- =========================================
-CREATE TYPE employment_status_enum AS ENUM ('ACTIVE', 'INACTIVE', 'ON_LEAVE');
-CREATE TYPE patient_status_enum AS ENUM ('ACTIVE', 'INACTIVE');
-CREATE TYPE slot_status_enum AS ENUM ('AVAILABLE', 'BOOKED', 'BLOCKED', 'CANCELLED');
-CREATE TYPE slot_type_enum AS ENUM ('CONSULTATION', 'FOLLOW_UP', 'TEST', 'EMERGENCY');
-CREATE TYPE appointment_status_enum AS ENUM ('BOOKED', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW');
-CREATE TYPE booking_channel_enum AS ENUM ('WEB', 'MOBILE', 'PHONE', 'WALK_IN');
-CREATE TYPE appointment_type_enum AS ENUM ('NEW', 'FOLLOW_UP', 'CHECKUP');
-CREATE TYPE payment_status_enum AS ENUM ('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_PAID');
-CREATE TYPE record_status_enum AS ENUM ('DRAFT', 'FINAL', 'AMENDED');
-
-
+CREATE TABLE IF NOT EXISTS slot_code_template (
+    slot_code VARCHAR(10) PRIMARY KEY,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    display_order INT
+);
+-- =========================================
+-- Hard insert slot code templates (can be modified later if needed)
+-- =========================================
+INSERT INTO slot_code_template (slot_code, start_time, end_time, display_order)
+VALUES ('8A', '08:00', '08:30', 1),
+    ('8B', '08:30', '09:00', 2),
+    ('9A', '09:00', '09:30', 3),
+    ('9B', '09:30', '10:00', 4),
+    ('10A', '10:00', '10:30', 5),
+    ('10B', '10:30', '11:00', 6),
+    ('11A', '11:00', '11:30', 7),
+    ('11B', '11:30', '12:00', 8),
+    ('13A', '13:00', '13:30', 9),
+    ('13B', '13:30', '14:00', 10),
+    ('14A', '14:00', '14:30', 11),
+    ('14B', '14:30', '15:00', 12),
+    ('15A', '15:00', '15:30', 13),
+    ('15B', '15:30', '16:00', 14),
+    ('16A', '16:00', '16:30', 15),
+    ('16B', '16:30', '17:00', 16) ON CONFLICT (slot_code) DO NOTHING;
 -- =========================================
 -- 3) TABLE: doctor
 -- =========================================
-CREATE TABLE doctor (
+CREATE TABLE IF NOT EXISTS doctor (
     doctor_id INT PRIMARY KEY,
     doctor_code VARCHAR(50),
     doctor_name VARCHAR(255) NOT NULL,
@@ -37,12 +124,10 @@ CREATE TABLE doctor (
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
-
-
 -- =========================================
 -- 4) TABLE: patient
 -- =========================================
-CREATE TABLE patient (
+CREATE TABLE IF NOT EXISTS patient (
     patient_id INT PRIMARY KEY,
     patient_name VARCHAR(255) NOT NULL,
     address VARCHAR(500),
@@ -58,42 +143,32 @@ CREATE TABLE patient (
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
-
-
 -- =========================================
 -- 5) TABLE: doctor_slot
 -- =========================================
-CREATE TABLE doctor_slot (
-    slot_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS doctor_slot (
+    slot_id SERIAL PRIMARY KEY,
     doctor_id INT NOT NULL,
     clinic_id INT,
     slot_date DATE NOT NULL,
-    start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP NOT NULL,
+    slot_code VARCHAR(10) NOT NULL,
     slot_status slot_status_enum NOT NULL,
     slot_type slot_type_enum,
     max_capacity INT DEFAULT 1 CHECK (max_capacity > 0),
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-
-    CONSTRAINT fk_doctor_slot_doctor
-        FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
-
-    CONSTRAINT chk_doctor_slot_time
-        CHECK (end_time > start_time)
+    CONSTRAINT fk_doctor_slot_doctor FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
+    CONSTRAINT fk_slot_code FOREIGN KEY (slot_code) REFERENCES slot_code_template(slot_code)
 );
-
-
 -- =========================================
 -- 6) TABLE: appointment
 -- =========================================
-CREATE TABLE appointment (
-    appointment_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS appointment (
+    appointment_id SERIAL PRIMARY KEY,
     confirmation_number VARCHAR(100) UNIQUE,
     slot_id INT NOT NULL,
     doctor_id INT NOT NULL,
     patient_id INT NOT NULL,
-
     status appointment_status_enum NOT NULL,
     booking_channel booking_channel_enum,
     appointment_type appointment_type_enum,
@@ -106,44 +181,32 @@ CREATE TABLE appointment (
     updated_by VARCHAR(100),
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-
-    CONSTRAINT fk_appointment_slot
-        FOREIGN KEY (slot_id) REFERENCES doctor_slot(slot_id),
-
-    CONSTRAINT fk_appointment_doctor
-        FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
-
-    CONSTRAINT fk_appointment_patient
-        FOREIGN KEY (patient_id) REFERENCES patient(patient_id)
+    CONSTRAINT fk_appointment_slot FOREIGN KEY (slot_id) REFERENCES doctor_slot(slot_id),
+    CONSTRAINT fk_appointment_doctor FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
+    CONSTRAINT fk_appointment_patient FOREIGN KEY (patient_id) REFERENCES patient(patient_id)
 );
-
-
 -- =========================================
 -- 7) TABLE: appointment_status_history
 -- =========================================
-CREATE TABLE appointment_status_history (
-    history_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS appointment_status_history (
+    history_id SERIAL PRIMARY KEY,
     appointment_id INT NOT NULL,
     old_status appointment_status_enum,
     new_status appointment_status_enum NOT NULL,
     changed_at TIMESTAMP NOT NULL,
     changed_by VARCHAR(100),
     reason TEXT,
-
-    CONSTRAINT fk_appointment_status_history_appointment
-        FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id)
+    CONSTRAINT fk_appointment_status_history_appointment FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id)
 );
-
-
 -- =========================================
 -- 8) TABLE: payment
 -- =========================================
-CREATE TABLE payment (
-    payment_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS payment (
+    payment_id SERIAL PRIMARY KEY,
     appointment_id INT NOT NULL,
-    amount_total DECIMAL(12,2) NOT NULL CHECK (amount_total >= 0),
-    amount_covered DECIMAL(12,2) DEFAULT 0 CHECK (amount_covered >= 0),
-    amount_patient_responsibility DECIMAL(12,2) DEFAULT 0 CHECK (amount_patient_responsibility >= 0),
+    amount_total DECIMAL(12, 2) NOT NULL CHECK (amount_total >= 0),
+    amount_covered DECIMAL(12, 2) DEFAULT 0 CHECK (amount_covered >= 0),
+    amount_patient_responsibility DECIMAL(12, 2) DEFAULT 0 CHECK (amount_patient_responsibility >= 0),
     paid_datetime TIMESTAMP,
     payment_status payment_status_enum,
     payment_method VARCHAR(100),
@@ -151,17 +214,13 @@ CREATE TABLE payment (
     currency VARCHAR(10) DEFAULT 'USD',
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-
-    CONSTRAINT fk_payment_appointment
-        FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id)
+    CONSTRAINT fk_payment_appointment FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id)
 );
-
-
 -- =========================================
 -- 9) TABLE: medical_record
 -- =========================================
-CREATE TABLE medical_record (
-    record_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS medical_record (
+    record_id SERIAL PRIMARY KEY,
     appointment_id INT NOT NULL,
     patient_id INT NOT NULL,
     doctor_id INT NOT NULL,
@@ -173,29 +232,28 @@ CREATE TABLE medical_record (
     record_status record_status_enum,
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-
-    CONSTRAINT fk_medical_record_appointment
-        FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id),
-
-    CONSTRAINT fk_medical_record_patient
-        FOREIGN KEY (patient_id) REFERENCES patient(patient_id),
-
-    CONSTRAINT fk_medical_record_doctor
-        FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id)
+    CONSTRAINT fk_medical_record_appointment FOREIGN KEY (appointment_id) REFERENCES appointment(appointment_id),
+    CONSTRAINT fk_medical_record_patient FOREIGN KEY (patient_id) REFERENCES patient(patient_id),
+    CONSTRAINT fk_medical_record_doctor FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id)
 );
-
-
 -- =========================================
 -- 10) INDEXES (recommended)
 -- =========================================
-CREATE INDEX idx_doctor_slot_doctor_id ON doctor_slot(doctor_id);
-CREATE INDEX idx_appointment_slot_id ON appointment(slot_id);
-CREATE INDEX idx_appointment_doctor_id ON appointment(doctor_id);
-CREATE INDEX idx_appointment_patient_id ON appointment(patient_id);
-CREATE INDEX idx_appointment_status ON appointment(status);
-CREATE INDEX idx_appointment_booked_at ON appointment(booked_at);
-CREATE INDEX idx_appointment_status_history_appointment_id ON appointment_status_history(appointment_id);
-CREATE INDEX idx_payment_appointment_id ON payment(appointment_id);
-CREATE INDEX idx_medical_record_appointment_id ON medical_record(appointment_id);
-CREATE INDEX idx_medical_record_patient_id ON medical_record(patient_id);
-CREATE INDEX idx_medical_record_doctor_id ON medical_record(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_doctor_slot_doctor_id ON doctor_slot(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_slot_id ON appointment(slot_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_doctor_id ON appointment(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_patient_id ON appointment(patient_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_status ON appointment(status);
+CREATE INDEX IF NOT EXISTS idx_appointment_booked_at ON appointment(booked_at);
+CREATE INDEX IF NOT EXISTS idx_appointment_status_history_appointment_id ON appointment_status_history(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_payment_appointment_id ON payment(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_medical_record_appointment_id ON medical_record(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_medical_record_patient_id ON medical_record(patient_id);
+CREATE INDEX IF NOT EXISTS idx_medical_record_doctor_id ON medical_record(doctor_id);
+
+-- 🔥 SYNC ONLY TABLES WITH SERIAL
+SELECT setval('appointment_appointment_id_seq', COALESCE((SELECT MAX(appointment_id) FROM appointment),1));
+SELECT setval('doctor_slot_slot_id_seq', COALESCE((SELECT MAX(slot_id) FROM doctor_slot),1));
+-- nếu có thêm:
+SELECT setval('payment_payment_id_seq', COALESCE((SELECT MAX(payment_id) FROM payment),1));
+SELECT setval('medical_record_record_id_seq', COALESCE((SELECT MAX(record_id) FROM medical_record),1));

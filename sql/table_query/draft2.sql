@@ -1,0 +1,1 @@
+select count(*) from doctor_slot WHERE slot_status = 'BOOKED';

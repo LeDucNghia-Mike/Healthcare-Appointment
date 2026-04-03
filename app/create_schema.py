@@ -23,7 +23,7 @@ def create_database():
 
 def create_schema():
     # explanation: Đọc file SQL schema và execute để tạo enum + 7 bảng.
-    schema_path = Path("sql/set_up_postgres_db.sql")
+    schema_path = Path("sql/set_up_postgres_db2.sql")
     ddl_sql = schema_path.read_text(encoding="utf-8")
 
     conn = get_app_connection()

@@ -2,30 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { SLOT_MAP } from "@/app/constants/slots";
-type SlotStatus = "AVAILABLE" | "BOOKED" | "BLOCKED";
+
+type SlotStatus = "AVAILABLE" | "BOOKED" | "NOT_AVAILABLE";
+
 const getToday = () => {
   return new Date().toISOString().split("T")[0];
 };
+
 export default function PatientBookingPage() {
   const [doctorId, setDoctorId] = useState<string | null>(null);
+  const [insurance, setInsurance] = useState<string | null>(null);
   const [patientId, setPatientId] = useState<string | null>(null);
+
   const [date, setDate] = useState<string>(() => {
     if (typeof window === "undefined") return "";
-
     const saved = localStorage.getItem("patient_selected_date");
-
     return saved ? saved : getToday();
   });
+
   const [slots, setSlots] = useState<Record<string, SlotStatus>>({});
   const [slotOwners, setSlotOwners] = useState<Record<string, string>>({});
   const [slotIds, setSlotIds] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+
   // =========================
   // INIT USER DATA
   // =========================
   useEffect(() => {
     setDoctorId(localStorage.getItem("selected_doctor_id"));
-    setPatientId(localStorage.getItem("user_id"));
+    setInsurance(localStorage.getItem("user_insurance"));
+    setPatientId(localStorage.getItem("user_id")); // 🔥 thêm
   }, []);
 
   // =========================
@@ -34,20 +40,24 @@ export default function PatientBookingPage() {
   const getTwoDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 2);
-
     return d.toISOString().split("T")[0];
   };
+
   useEffect(() => {
     if (date) {
       localStorage.setItem("patient_selected_date", date);
     }
   }, [date]);
+
   // =========================
   // FETCH SLOTS
   // =========================
   useEffect(() => {
     if (!doctorId || !date) return;
 
+    setSlots({});
+    setSlotOwners({});
+    setSlotIds({});
     const fetchSlots = async () => {
       try {
         setLoading(true);
@@ -63,7 +73,18 @@ export default function PatientBookingPage() {
         const idMap: Record<string, string> = {};
 
         for (const s of data) {
-          mapped[s.slot_code] = s.slot_status;
+          // 🔥 normalize status
+          let status: SlotStatus;
+
+          if (s.slot_status === "AVAILABLE") {
+            status = "AVAILABLE";
+          } else if (s.slot_status === "BOOKED") {
+            status = "BOOKED";
+          } else {
+            status = "NOT_AVAILABLE";
+          }
+
+          mapped[s.slot_code] = status;
 
           if (s.slot_id) {
             idMap[s.slot_code] = s.slot_id;
@@ -103,10 +124,10 @@ export default function PatientBookingPage() {
   const isInvalidDate = date ? isPastOrToday(date) : true;
 
   // =========================
-  // BOOK SLOT
+  // BOOK SLOT (FIXED)
   // =========================
   const handleBook = async (slot: string) => {
-    if (!doctorId || !patientId || !date) return;
+    if (!doctorId || !insurance || !date) return;
 
     if (isInvalidDate) {
       alert("Invalid date");
@@ -138,12 +159,18 @@ export default function PatientBookingPage() {
       }
 
       const result = await res.json();
+      if (!result.success) {
+        alert(result.message);
+        return;
+      }
 
       alert(`Booked successfully!\nTransaction: ${result.booking_ref}`);
 
-      // update UI ngay lập tức
       setSlots((prev) => ({ ...prev, [slot]: "BOOKED" }));
-      setSlotOwners((prev) => ({ ...prev, [slot]: patientId! }));
+      setSlotOwners((prev) => ({
+        ...prev,
+        [slot]: String(patientId),
+      }));
     } catch (err) {
       console.error(err);
       alert("Server error");
@@ -151,10 +178,10 @@ export default function PatientBookingPage() {
   };
 
   // =========================
-  // CANCEL SLOT
+  // CANCEL SLOT (FIXED)
   // =========================
   const handleCancel = async (slot: string) => {
-    if (!doctorId || !patientId || !date) return;
+    if (!doctorId || !insurance || !date) return;
 
     const slotId = slotIds[slot];
 
@@ -171,7 +198,7 @@ export default function PatientBookingPage() {
         },
         body: JSON.stringify({
           slot_id: slotId,
-          patient_id: Number(patientId),
+          insurance_number: insurance,
         }),
       });
 
@@ -184,9 +211,9 @@ export default function PatientBookingPage() {
 
       setSlots((prev) => ({ ...prev, [slot]: "AVAILABLE" }));
       setSlotOwners((prev) => {
-        const copy = { ...prev };
-        delete copy[slot];
-        return copy;
+        const newOwners = { ...prev };
+        delete newOwners[slot];
+        return newOwners;
       });
     } catch (err) {
       console.error(err);
@@ -200,10 +227,13 @@ export default function PatientBookingPage() {
   // UI
   // =========================
   return (
-    
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <h1 className="text-xl font-semibold">Booking Doctor ID: {doctorId}</h1>
 
+      {/* 🔥 THÊM NGAY TẠI ĐÂY */}
+      <div className="text-sm text-gray-500">Insurance: {insurance}</div>
+
+      <div style={{ display: "none" }}>Patient ID: {patientId}</div>
       <input
         type="date"
         className="border p-2 rounded"
@@ -229,40 +259,44 @@ export default function PatientBookingPage() {
           }
 
           if (status === "BOOKED") {
-            const isMine = slotOwners[slot] === patientId;
+            const isMySlot = slotOwners[slot] === patientId;
 
-            if (isMine) {
-              return (
-                <div key={slot} className="border p-3 bg-pink-50 rounded">
-                  <div>{slot}</div>
-                  <div>{time}</div>
-                  <div className="text-pink-600 font-bold">YOUR BOOKING</div>
+            return (
+              <div
+                key={slot}
+                className={`border p-3 rounded ${
+                  isMySlot ? "bg-pink-100" : "bg-yellow-50"
+                }`}
+              >
+                <div>{slot}</div>
+                <div>{time}</div>
 
+                <div
+                  className={`font-bold ${
+                    isMySlot ? "text-pink-600" : "text-red-500"
+                  }`}
+                >
+                  BOOKED
+                </div>
+
+                {isMySlot && (
                   <button
                     onClick={() => handleCancel(slot)}
-                    className="mt-2 bg-pink-500 text-white px-2 py-1 rounded"
+                    className="mt-2 bg-red-500 text-white px-2 py-1 rounded"
                   >
                     Cancel
                   </button>
-                </div>
-              );
-            }
-
-            return (
-              <div key={slot} className="border p-3 bg-yellow-50 rounded">
-                <div>{slot}</div>
-                <div>{time}</div>
-                <div className="text-red-500 font-bold">BOOKED</div>
+                )}
               </div>
             );
           }
 
-          if (status === "BLOCKED") {
+          if (status === "NOT_AVAILABLE") {
             return (
               <div key={slot} className="border p-3 bg-gray-200 rounded">
                 <div>{slot}</div>
                 <div>{time}</div>
-                <div className="text-gray-500">BLOCKED</div>
+                <div className="text-red-500">NOT AVAILABLE</div>
               </div>
             );
           }

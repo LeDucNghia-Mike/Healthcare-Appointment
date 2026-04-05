@@ -1,0 +1,2 @@
+DROP DATABASE IF EXISTS healthcare_booking_realtime;
+CREATE DATABASE healthcare_booking_realtime;

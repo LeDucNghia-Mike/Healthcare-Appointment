@@ -140,7 +140,11 @@ def fetch_one(query: str, params=None):
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, params or ())
-            return cur.fetchone()
+            result = cur.fetchone()
+
+            conn.commit()   # 🔥 THÊM DÒNG NÀY
+
+            return result
     except Exception:
         conn.rollback()
         raise
@@ -1128,43 +1132,158 @@ if __name__ == "__main__":
     run_stream()
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\__init__.py =====
 
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\jobs\scheduler.py =====
+from apscheduler.schedulers.background import BackgroundScheduler
+from app.services.schedule_service import confirm_generate, generate_preview
+from app.db import fetch_all, fetch_one
+from datetime import datetime
+
+scheduler = BackgroundScheduler()
+
+
+# ==============================
+# AUTO GENERATE
+# ==============================
+def auto_generate():
+    today = datetime.today()
+
+    # ==============================
+    # FIX MONTH ROLLOVER
+    # ==============================
+    if today.month == 12:
+        target_month = 1
+        target_year = today.year + 1
+    else:
+        target_month = today.month + 1
+        target_year = today.year
+
+    print(f"[CRON] Running auto generate for {target_month}/{target_year}")
+
+    doctors = fetch_all("SELECT doctor_id FROM doctor")
+
+    for d in doctors:
+        doctor_id = d["doctor_id"]
+
+        # ==============================
+        # CHECK LOCK
+        # ==============================
+        check = fetch_one("""
+            SELECT is_inserted
+            FROM doctor_insert_month
+            WHERE doctor_id = %s
+            AND year = %s
+            AND month = %s
+        """, (doctor_id, target_year, target_month))
+
+        if check and check["is_inserted"]:
+            print(f"[SKIP] {doctor_id} already generated")
+            continue
+
+        # ==============================
+        # GENERATE PREVIEW
+        # ==============================
+        preview = generate_preview(doctor_id, target_year, target_month)
+
+        if not preview:
+            print(f"[WARN] No preview for {doctor_id}")
+            continue
+
+        slots = []
+
+        for key, value in preview.items():
+            if value == "GREEN":
+                dow, slot_code = key.split("_")
+                slots.append({
+                    "dow": int(dow),
+                    "slot_code": slot_code
+                })
+
+        # ==============================
+        # NO SLOT → SKIP
+        # ==============================
+        if not slots:
+            print(f"[SKIP] No valid slots for {doctor_id}")
+            continue
+
+        try:
+            confirm_generate(doctor_id, target_year, target_month, slots)
+            print(f"[SUCCESS] Generated for {doctor_id}")
+        except Exception as e:
+            print(f"[ERROR] {doctor_id}: {str(e)}")
+
+# ==============================
+# START SCHEDULER
+# ==============================
+def start_scheduler():
+    scheduler.add_job(
+        auto_generate,
+        trigger='cron',
+        day='last',
+        hour=23,
+        minute=0
+    )
+    scheduler.start()
+
+    print("[CRON] Scheduler started").
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\appointment_route.py =====
 from fastapi import APIRouter, HTTPException
 from app.services.appointment_service import *
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
+
+# ==============================
+# GET ALL
+# ==============================
 @router.get("/")
 def get_all():
     return get_all_appointments()
 
+
+# ==============================
+# GET BY ID
+# ==============================
 @router.get("/{id}")
-def get_one(id:int):
-    appt=get_appointment_by_id(id)
-    if not appt: raise HTTPException(404,"Not found")
+def get_one(id: int):
+    appt = get_appointment_by_id(id)
+    if not appt:
+        raise HTTPException(404, "Not found")
     return appt
 
+@router.get("/appointments/patient/{patient_id}")
+def get_patient_appointments_api(patient_id: int):
+    return get_patient_appointments(patient_id)
+
+@router.get("/appointments/doctor/{doctor_id}")
+def get_doctor_appointments_api(doctor_id: str):
+    return get_doctor_appointments(doctor_id)
+
+# ==============================
+# BOOK SLOT
+# ==============================
 @router.post("/")
 def create(data: dict):
-    result = create_appointment(data)
-    return result
+    return create_appointment(data)
 
-@router.put("/{id}")
-def update(id:int,data:dict):
-    update_appointment(id,data)
-    return {"msg":"updated"}
 
-@router.delete("/{id}")
-def delete(id:int):
-    delete_appointment(id)
-    return {"msg":"deleted"}
-
+# ==============================
+# CANCEL
+# ==============================
 @router.post("/cancel")
 def cancel(data: dict):
     return cancel_appointment(
-        data["slot_id"],
-        data["patient_id"]
-    ).
+        data["slot_id"],   # str
+        data["insurance_number"] # str
+    )
+
+
+# ==============================
+# DELETE (optional)
+# ==============================
+@router.delete("/{id}")
+def delete(id: int):
+    delete_appointment(id)
+    return {"msg": "deleted"}.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\auth_route.py =====
 from fastapi import APIRouter, HTTPException
 from app.services.patient_service import get_patient_by_id
@@ -1218,35 +1337,48 @@ from app.services.doctor_service import *
 router = APIRouter(prefix="/doctors", tags=["Doctors"])
 
 
-# 🔹 GET ALL
+# ==============================
+# GET ALL
+# ==============================
 @router.get("/")
 def get_doctors():
-    return get_all_doctors()
+    return get_all_doctors()    
 
 
-# 🔹 GET BY ID
+# ==============================
+# GET BY ID
+# ==============================
 @router.get("/{doctor_id}")
-def get_doctor(doctor_id: int):
+def get_doctor(doctor_id: str):
     doctor = get_doctor_by_id(doctor_id)
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
     return doctor
 
+
+# ==============================
+# GET BY SPECIALTY
+# ==============================
 @router.get("/specialty/{specialty}")
 def get_doctors_by_specialty(specialty: str):
     return get_doctors_by_specialty_db(specialty)
 
 
-# 🔹 CREATE
+# ==============================
+# CREATE
+# ==============================
 @router.post("/")
 def create_new_doctor(data: dict):
-    create_doctor(data)
-    return {"message": "Doctor created successfully"}
+    doctor_id = create_doctor(data)
+    return {
+        "doctor_id": doctor_id
+    }
 
-
-# 🔹 UPDATE
+# ==============================
+# UPDATE
+# ==============================
 @router.put("/{doctor_id}")
-def update_existing_doctor(doctor_id: int, data: dict):
+def update_existing_doctor(doctor_id: str, data: dict):
     doctor = get_doctor_by_id(doctor_id)
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
@@ -1255,9 +1387,11 @@ def update_existing_doctor(doctor_id: int, data: dict):
     return {"message": "Doctor updated successfully"}
 
 
-# 🔹 DELETE
+# ==============================
+# DELETE
+# ==============================
 @router.delete("/{doctor_id}")
-def delete_existing_doctor(doctor_id: int):
+def delete_existing_doctor(doctor_id: str):
     doctor = get_doctor_by_id(doctor_id)
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
@@ -1265,27 +1399,31 @@ def delete_existing_doctor(doctor_id: int):
     delete_doctor(doctor_id)
     return {"message": "Doctor deleted successfully"}.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\doctor_slot_route.py =====
-from fastapi import APIRouter, HTTPException, Query
-from app.services.doctor_slot_service import *
+from fastapi import APIRouter, HTTPException
+from app.services.doctor_slot_service import (
+    get_doctor_slots,
+    get_patient_by_slot,
+    get_slot_id,
+    upsert_doctor_slot,
+    delete_slot
+)
 
 router = APIRouter(prefix="/slots", tags=["Slots"])
 
-@router.get("/")
-def get_all():
-    return get_all_slots()
 
-@router.get("/{slot_id}")
-def get_one(slot_id:int):
-    slot = get_slot_by_id(slot_id)
-    if not slot: raise HTTPException(404,"Not found")
-    return slot
-
+# ==============================
+# GET ALL SLOTS FOR DOCTOR (UI)
+# ==============================
 @router.get("/doctor/slots/{doctor_id}/{date}")
-def get_slots(doctor_id: int, date: str):
+def get_slots(doctor_id: str, date: str):
     return get_doctor_slots(doctor_id, date)
 
+
+# ==============================
+# GET PATIENT IN SLOT
+# ==============================
 @router.get("/doctor/{doctor_id}/{date}/{slot_code}/patient")
-def get_patient(doctor_id: int, date: str, slot_code: str):
+def get_patient(doctor_id: str, date: str, slot_code: str):
     result = get_patient_by_slot(doctor_id, date, slot_code)
 
     if not result:
@@ -1293,8 +1431,12 @@ def get_patient(doctor_id: int, date: str, slot_code: str):
 
     return result
 
+
+# ==============================
+# GET SLOT ID
+# ==============================
 @router.get("/doctor/slot/{doctor_id}/{date}/{slot_code}")
-def get_slot_id_route(doctor_id: int, date: str, slot_code: str):
+def get_slot_id_route(doctor_id: str, date: str, slot_code: str):
     result = get_slot_id(doctor_id, date, slot_code)
 
     if not result:
@@ -1302,43 +1444,61 @@ def get_slot_id_route(doctor_id: int, date: str, slot_code: str):
 
     return result
 
-@router.post("/")
-def create(data:dict):
-    create_slot(data)
-    return {"msg":"created"}
 
-@router.put("/{slot_id}")
-def update(slot_id:int,data:dict):
-    update_slot(slot_id,data)
-    return {"msg":"updated"}
-
+# ==============================
+# UPSERT SLOT (MAIN API)
+# ==============================
 @router.put("/doctor/slot/{doctor_id}/{date}/{slot_code}/{status}")
-def update_slot(
-    doctor_id: int,
+def update_slot_status(
+    doctor_id: str,
     date: str,
     slot_code: str,
     status: str
 ):
     return upsert_doctor_slot(doctor_id, date, slot_code, status)
 
+
+# ==============================
+# DELETE SLOT
+# ==============================
 @router.delete("/{slot_id}")
-def delete(slot_id:int):
+def delete(slot_id: str):
     delete_slot(slot_id)
-    return {"msg":"deleted"}.
+    return {"msg": "deleted"}.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\medical_record_route.py =====
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from app.services.medical_record_service import *
 
 router = APIRouter(prefix="/records", tags=["Medical Records"])
 
+
+# ==============================
+# GET ALL
+# ==============================
 @router.get("/")
 def get_all():
     return get_all_records()
 
+
+# ==============================
+# GET LATEST RECORD
+# ==============================
+@router.get("/{slot_id}/{patient_id}")
+def get_latest(slot_id: str, patient_id: int):
+    record = get_latest_record(slot_id, patient_id)
+
+    if not record:
+        raise HTTPException(404, "Record not found")
+
+    return record
+
+
+# ==============================
+# CREATE (NEW VERSION)
+# ==============================
 @router.post("/")
-def create(data:dict):
-    create_record(data)
-    return {"msg":"created"}.
+def create(data: dict):
+    return create_record(data).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\patient_route.py =====
 from fastapi import APIRouter, HTTPException
 from app.services.patient_service import *
@@ -1346,13 +1506,17 @@ from app.services.patient_service import *
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
 
-# 🔹 GET ALL
+# ==============================
+# GET ALL
+# ==============================
 @router.get("/")
 def get_patients():
     return get_all_patients()
 
 
-# 🔹 GET BY ID
+# ==============================
+# GET BY ID
+# ==============================
 @router.get("/{patient_id}")
 def get_patient(patient_id: int):
     patient = get_patient_by_id(patient_id)
@@ -1360,15 +1524,41 @@ def get_patient(patient_id: int):
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
 
+# ==============================
+# GET ALL INSURANCE NUMBERS
+# ==============================
+@router.get("/insurance-numbers/all")
+def get_insurance_numbers():
+    return get_all_insurance_numbers()
 
-# 🔹 CREATE
+
+@router.get("/by-insurance/{insurance}")
+def get_patient_by_insurance(insurance: str):
+    patient = fetch_one("""
+        SELECT patient_id
+        FROM patient
+        WHERE insurance_number = %s
+    """, (insurance,))
+
+    if not patient:
+        raise HTTPException(404, "Not found")
+
+    return patient
+
+# ==============================
+# CREATE
+# ==============================
 @router.post("/")
-def create_new_patient(data: dict):
-    create_patient(data)
-    return {"message": "Patient created successfully"}
+def create(data: dict):
+    patient_id = create_patient(data)
+    return {
+        "patient_id": patient_id
+    }
 
 
-# 🔹 UPDATE
+# ==============================
+# UPDATE
+# ==============================
 @router.put("/{patient_id}")
 def update_existing_patient(patient_id: int, data: dict):
     patient = get_patient_by_id(patient_id)
@@ -1379,7 +1569,9 @@ def update_existing_patient(patient_id: int, data: dict):
     return {"message": "Patient updated successfully"}
 
 
-# 🔹 DELETE
+# ==============================
+# DELETE
+# ==============================
 @router.delete("/{patient_id}")
 def delete_existing_patient(patient_id: int):
     patient = get_patient_by_id(patient_id)
@@ -1402,6 +1594,31 @@ def get_all():
 def create(data:dict):
     create_payment(data)
     return {"msg":"created"}.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\schedule_router.py =====
+from fastapi import APIRouter
+from app.services.schedule_service import *
+
+router = APIRouter(prefix="/schedule", tags=["Schedule"])
+
+
+@router.get("/preview/{doctor_id}/{year}/{month}")
+def preview(doctor_id: str, year: int, month: int):
+    return generate_preview(doctor_id, year, month)
+
+
+@router.get("/status/{doctor_id}/{year}/{month}")
+def status(doctor_id: str, year: int, month: int):
+    return get_month_status(doctor_id, year, month)
+
+
+@router.post("/confirm")
+def confirm(data: dict):
+    return confirm_generate(
+        data["doctor_id"],
+        data["year"],
+        data["month"],
+        data["slots"]
+    ).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\seeds\seed_total.py =====
 
 
@@ -1410,18 +1627,25 @@ from app.seeds.seed_table.seed_doctor import seed_doctors
 from app.seeds.seed_table.seed_patient import seed_patients
 from app.seeds.seed_table.seed_doctor_slot import seed_doctor_slots
 from app.seeds.seed_table.seed_transaction_appointment import seed_appointment_transaction
-from app.seeds.seed_table.seed_actual_appointment import seed_appointment_actual_from_csv
+# from app.seeds.seed_table.seed_actual_appointment import seed_appointment_actual_from_csv
 from app.seeds.seed_table.seed_medical_record import seed_medical_record
 def seed_all():
     seed_doctors()
     seed_patients()
     seed_doctor_slots()
     seed_appointment_transaction()
-    seed_appointment_actual_from_csv()
+    # seed_appointment_actual_from_csv()
     seed_medical_record()
 
 if __name__ == "__main__":
     seed_all().
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\seeds\seed_table\get_data_list.py =====
+import pandas as pd
+from pathlib import Path
+
+file_path = Path(__file__).resolve().parents[1] / "data" / "dim_doctor.csv"
+df = pd.read_csv(file_path, encoding="utf-8-sig")
+print(list(df["specialty"].unique())).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\seeds\seed_table\seed_actual_appointment.py =====
 def seed_appointment_actual_from_csv():
     from pathlib import Path
@@ -1465,7 +1689,7 @@ def seed_appointment_actual_from_csv():
                     booked_at
                 )
                 VALUES %s
-                ON CONFLICT (booking_ref) DO NOTHING;
+                ON CONFLICT (slot_id) DO NOTHING;
                 """,
                 rows,
                 page_size=1000
@@ -1634,7 +1858,7 @@ def seed_patients():
         rows.append((
             row["patientName"],
             row["address"],
-            row["phoneNumber"],
+            str(row["phoneNumber"]).zfill(10),  # Đảm bảo phone_number là string (Adding 0 since csv don't support this format)
             row["insuranceNumber"],
             row["dateOfBirth"],
             row["gender"],
@@ -1675,7 +1899,6 @@ def seed_appointment_transaction():
 
     df = pd.read_csv(file_path, encoding="utf-8-sig")
 
-    # ✅ parse đúng format 12h (AM/PM)
     df["event_timestamp"] = pd.to_datetime(
         df["event_timestamp"],
         format="%Y-%m-%d %I:%M%p"
@@ -1686,10 +1909,9 @@ def seed_appointment_transaction():
 
     rows = [
         (
-            clean(row["transaction_id"]),
             clean(row["slotid"]),
             clean(row["patientID"]),
-            clean(row["status"]).upper(),   # enum cần uppercase
+            clean(row["status"]).upper(),
             clean(row["event_timestamp"])
         )
         for _, row in df.iterrows()
@@ -1698,11 +1920,14 @@ def seed_appointment_transaction():
     conn = get_app_connection()
     try:
         with conn.cursor() as cur:
+
+            # =========================
+            # 1. INSERT TRANSACTION
+            # =========================
             execute_values(
                 cur,
                 """
                 INSERT INTO appointment_transaction (
-                    transaction_id,
                     slot_id,
                     patient_id,
                     action,
@@ -1713,90 +1938,269 @@ def seed_appointment_transaction():
                 rows,
                 page_size=1000
             )
+
+            # 🔥 log transaction rows
+            transaction_count = len(rows)
+
+            # =========================
+            # 2. REBUILD APPOINTMENT
+            # =========================
+            cur.execute("DELETE FROM appointment;")
+
+            cur.execute("""
+                INSERT INTO appointment (
+                    booking_ref,
+                    slot_id,
+                    patient_id,
+                    booked_at
+                )
+                SELECT
+                    t.transaction_id,
+                    t.slot_id,
+                    t.patient_id,
+                    t.created_at
+                FROM (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY slot_id
+                               ORDER BY created_at DESC
+                           ) as rn
+                    FROM appointment_transaction
+                ) t
+                WHERE t.rn = 1
+                AND t.action = 'BOOKED'
+                RETURNING appointment_id;
+            """)
+
+            inserted = cur.fetchall()
+            appointment_count = len(inserted)
+
         conn.commit()
-        print(f"Seeded transaction: {len(rows)} rows")
+
+        # =========================
+        # 🔥 LOG RÕ RÀNG
+        # =========================
+        print(f"✅ Transaction rows inserted: {transaction_count}")
+        print(f"✅ Appointment rows created: {appointment_count}")
+
     finally:
         conn.close().
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\appointment_service.py =====
-from app.db import fetch_all, execute_query, fetch_one, get_app_connection
+from app.db import fetch_all, fetch_one, execute_query, get_app_connection
+from datetime import datetime
 
-
+# ==============================
+# GET ALL
+# ==============================
 def get_all_appointments():
-    return fetch_all("SELECT * FROM appointment ORDER BY appointment_id;")
+    return fetch_all("""
+        SELECT *
+        FROM appointment
+        ORDER BY appointment_id;
+    """)
 
 
-def get_appointment_by_id(id: int):
-    res = fetch_all("SELECT * FROM appointment WHERE appointment_id=%s;", (id,))
-    return res[0] if res else None
+# ==============================
+# GET BY ID
+# ==============================
+def get_appointment_by_id(appointment_id: int):
+    return fetch_one("""
+        SELECT *
+        FROM appointment
+        WHERE appointment_id = %s;
+    """, (appointment_id,))
 
+def get_patient_appointments(patient_id: int):
+    query = """
+        SELECT 
+            ds.doctor_id,
+            ds.slot_date,
+            ds.slot_code,
+            a.booking_ref,
+            a.booked_at
+        FROM appointment a
+        JOIN doctor_slot ds 
+            ON a.slot_id = ds.slot_id
+        WHERE a.patient_id = %s
+        ORDER BY ds.slot_date, ds.slot_code;
+    """
 
+    return fetch_all(query, (patient_id,))
+
+# ==============================
+# CREATE (BOOK SLOT)
+# ==============================
 def create_appointment(data: dict):
     conn = get_app_connection()
+
     try:
         with conn.cursor() as cur:
 
-            # 🔒 1. check + lock slot
+            # =========================
+            # 0. VALIDATE INPUT
+            # =========================
+            slot_id = data.get("slot_id")
+            patient_id = data.get("patient_id")
+
+            if not slot_id or not patient_id:
+                raise Exception("Missing slot_id or patient_id")
+
+            # =========================
+            # 1. LOCK SLOT + CHECK STATUS
+            # =========================
             cur.execute("""
-                SELECT slot_id, doctor_id
+                SELECT slot_status
                 FROM doctor_slot
                 WHERE slot_id = %s
-                AND slot_status = 'AVAILABLE'
                 FOR UPDATE;
-            """, (data["slot_id"],))
+            """, (slot_id,))
 
-            slot = cur.fetchone()
+            row = cur.fetchone()
 
-            if not slot:
+            if not row:
+                raise Exception("Slot not found")
+
+            slot_status = row[0]
+
+            if slot_status == "BLOCKED":
+                raise Exception("That slot is blocked")
+
+            if slot_status == "BOOKED":
                 raise Exception("Slot already booked")
 
-            slot_id, doctor_id = slot
-
-            # 🔥 2. insert appointment
+            # =========================
+            # 2. INSERT TRANSACTION
+            # =========================
             cur.execute("""
-                INSERT INTO appointment(
+                INSERT INTO appointment_transaction (
                     slot_id,
-                    doctor_id,
                     patient_id,
-                    status,
-                    booking_channel,
-                    appointment_type,
-                    reason_for_visit,
-                    booked_at,
-                    created_at,
-                    updated_at
+                    action,
+                    created_at
                 )
-                VALUES (%s,%s,%s,'BOOKED','WEB','NEW',%s,NOW(),NOW(),NOW())
+                VALUES (%s, %s, 'BOOKED', NOW())
+                RETURNING transaction_id;
+            """, (slot_id, patient_id))
+
+            txn_id = cur.fetchone()[0]
+
+            # =========================
+            # 3. INSERT APPOINTMENT
+            # =========================
+            cur.execute("""
+                INSERT INTO appointment (
+                    booking_ref,
+                    slot_id,
+                    patient_id,
+                    booked_at
+                )
+                VALUES (%s, %s, %s, NOW())
                 RETURNING appointment_id;
-            """, (
-                slot_id,
-                doctor_id,
-                data["patient_id"],
-                data.get("reason_for_visit"),
-            ))
+            """, (txn_id, slot_id, patient_id))
 
             appointment_id = cur.fetchone()[0]
 
-            # 🔥 3. update slot (move vào BE)
+            # =========================
+            # 4. UPDATE SLOT STATUS
+            # =========================
             cur.execute("""
                 UPDATE doctor_slot
-                SET slot_status = 'BOOKED',
-                    updated_at = NOW()
+                SET slot_status = 'BOOKED'
                 WHERE slot_id = %s;
             """, (slot_id,))
 
         conn.commit()
 
-        confirmation = f"CONF{str(appointment_id).zfill(6)}"
+        return {
+            "success": True,
+            "appointment_id": appointment_id,
+            "booking_ref": txn_id,
+            "message": "Booked successfully"
+        }
 
-        execute_query("""
-            UPDATE appointment
-            SET confirmation_number = %s
-            WHERE appointment_id = %s
-        """, (confirmation, appointment_id))
+    except Exception as e:
+        conn.rollback()
+
+        # =========================
+        # RETURN CLEAN ERROR
+        # =========================
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+    finally:
+        conn.close()
+        
+# ==============================
+# DELETE (ADMIN ONLY)
+# ==============================
+def delete_appointment(appointment_id: int):
+    execute_query("""
+        DELETE FROM appointment
+        WHERE appointment_id = %s;
+    """, (appointment_id,))
+
+
+# ==============================
+# CANCEL (PATIENT)
+# ==============================
+def cancel_appointment(slot_id: str, insurance_number: str):
+    conn = get_app_connection()
+
+    try:
+        with conn.cursor() as cur:
+
+            # 1. CHECK OWNERSHIP (insurance → patient → appointment)
+            cur.execute("""
+                SELECT a.appointment_id, a.patient_id
+                FROM appointment a
+                JOIN patient p 
+                    ON a.patient_id = p.patient_id
+                WHERE a.slot_id = %s
+                AND p.insurance_number = %s;
+            """, (slot_id, insurance_number))
+
+            appt = cur.fetchone()
+
+            if not appt:
+                raise Exception("Not your booking")
+
+            appointment_id = appt[0]
+            patient_id = appt[1]
+
+            # 2. LOG TRANSACTION
+            cur.execute("""
+                INSERT INTO appointment_transaction (
+                    slot_id,
+                    patient_id,
+                    action,
+                    created_at
+                )
+                VALUES (%s, %s, 'CANCELLED', NOW())
+                RETURNING transaction_id;
+            """, (slot_id, patient_id))
+
+            cancel_txn = cur.fetchone()[0]
+
+            # 3. DELETE APPOINTMENT
+            cur.execute("""
+                DELETE FROM appointment
+                WHERE appointment_id = %s;
+            """, (appointment_id,))
+
+            # 4. UPDATE SLOT
+            cur.execute("""
+                UPDATE doctor_slot
+                SET slot_status = 'AVAILABLE'
+                WHERE slot_id = %s;
+            """, (slot_id,))
+
+        conn.commit()
 
         return {
-            "appointment_id": appointment_id,
-            "confirmation_number": confirmation
+            "message": "Cancelled",
+            "cancel_transaction": cancel_txn
         }
 
     except Exception as e:
@@ -1805,203 +2209,217 @@ def create_appointment(data: dict):
 
     finally:
         conn.close()
-
-def update_appointment(id: int, data: dict):
+        
+def get_doctor_appointments(doctor_id: str):
     query = """
-    UPDATE appointment SET
-        status=%s,
-        updated_at=NOW()
-    WHERE appointment_id=%s;
+        SELECT 
+            a.patient_id,
+            ds.slot_id,
+            ds.slot_date,
+            ds.slot_code
+        FROM appointment a
+        JOIN doctor_slot ds 
+            ON a.slot_id = ds.slot_id
+        WHERE ds.doctor_id = %s
+        ORDER BY ds.slot_date, ds.slot_code;
     """
-    execute_query(query, (data.get("status"), id))
 
-
-def delete_appointment(id: int):
-    execute_query("DELETE FROM appointment WHERE appointment_id=%s;", (id,))
-
-def cancel_appointment(slot_id: int, patient_id: int):
-    conn = get_app_connection()
-    try:
-        with conn.cursor() as cur:
-
-            # 🔒 check ownership
-            cur.execute("""
-                SELECT appointment_id
-                FROM appointment
-                WHERE slot_id = %s
-                AND patient_id = %s;
-            """, (slot_id, patient_id))
-
-            appt = cur.fetchone()
-
-            if not appt:
-                raise Exception("Not your booking")
-
-            appointment_id = appt[0]
-
-            # 🔥 delete appointment
-            cur.execute("""
-                DELETE FROM appointment
-                WHERE appointment_id = %s;
-            """, (appointment_id,))
-
-            # 🔥 update slot → AVAILABLE
-            cur.execute("""
-                UPDATE doctor_slot
-                SET slot_status = 'AVAILABLE',
-                    updated_at = NOW()
-                WHERE slot_id = %s;
-            """, (slot_id,))
-
-        conn.commit()
-        return {"message": "Cancelled"}
-
-    except Exception as e:
-        conn.rollback()
-        raise e
-
-    finally:
-        conn.close()
-        .
+    return fetch_all(query, (doctor_id,))
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\doctor_service.py =====
-from app.db import fetch_all, execute_query
+from app.db import fetch_all, fetch_one, execute_query
 
 
-# 🔹 GET ALL DOCTORS
+# ==============================
+# GET ALL
+# ==============================
 def get_all_doctors():
-    query = """
-        SELECT * FROM doctor
+    return fetch_all("""
+        SELECT doctor_id, doctor_name, specialty, start_working_date
+        FROM doctor
         ORDER BY doctor_id;
-    """
-    return fetch_all(query)
+    """)
 
 
-# 🔹 GET DOCTOR BY ID
-def get_doctor_by_id(doctor_id: int):
-    query = """
-        SELECT * FROM doctor
+# ==============================
+# GET BY ID
+# ==============================
+def get_doctor_by_id(doctor_id: str):
+    return fetch_one("""
+        SELECT doctor_id, doctor_name, specialty, start_working_date
+        FROM doctor
         WHERE doctor_id = %s;
-    """
-    result = fetch_all(query, (doctor_id,))
-    return result[0] if result else None
+    """, (doctor_id,))
 
+
+# ==============================
+# GET BY SPECIALTY
+# ==============================
 def get_doctors_by_specialty_db(specialty: str):
-    query = """
+    return fetch_all("""
         SELECT doctor_id, doctor_name, specialty
         FROM doctor
         WHERE specialty = %s;
-    """
-    return fetch_all(query, (specialty,))
+    """, (specialty,))
 
-# 🔹 CREATE DOCTOR
+
+# ==============================
+# CREATE
+# ==============================
 def create_doctor(data: dict):
-    query = """
+    result = fetch_one("""
         INSERT INTO doctor (
-            doctor_id,
-            doctor_code,
             doctor_name,
             specialty,
-            phone_number,
-            email,
-            employment_status,
-            clinic_id,
-            start_working_date,
-            created_at,
-            updated_at
+            start_working_date
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW());
-    """
-
-    params = (
-        data["doctor_id"],
-        data.get("doctor_code"),
+        VALUES (%s, %s, %s)
+        RETURNING doctor_id;
+    """, (
         data["doctor_name"],
         data["specialty"],
-        data.get("phone_number"),
-        data.get("email"),
-        data.get("employment_status", "ACTIVE"),
-        data.get("clinic_id"),
-        data.get("start_working_date"),
-    )
+        data.get("start_working_date")
+    ))
 
-    execute_query(query, params)
+    return result["doctor_id"]
 
-
-# 🔹 UPDATE DOCTOR
-def update_doctor(doctor_id: int, data: dict):
-    query = """
+# ==============================
+# UPDATE
+# ==============================
+def update_doctor(doctor_id: str, data: dict):
+    execute_query("""
         UPDATE doctor
         SET
-            doctor_code = %s,
             doctor_name = %s,
             specialty = %s,
-            phone_number = %s,
-            email = %s,
-            employment_status = %s,
-            clinic_id = %s,
-            start_working_date = %s,
-            updated_at = NOW()
+            start_working_date = %s
         WHERE doctor_id = %s;
-    """
-
-    params = (
-        data.get("doctor_code"),
+    """, (
         data.get("doctor_name"),
         data.get("specialty"),
-        data.get("phone_number"),
-        data.get("email"),
-        data.get("employment_status"),
-        data.get("clinic_id"),
         data.get("start_working_date"),
-        doctor_id,
-    )
-
-    execute_query(query, params)
+        doctor_id
+    ))
 
 
-# 🔹 DELETE DOCTOR
-def delete_doctor(doctor_id: int):
-    query = """
+# ==============================
+# DELETE
+# ==============================
+def delete_doctor(doctor_id: str):
+    execute_query("""
         DELETE FROM doctor
         WHERE doctor_id = %s;
-    """
-    execute_query(query, (doctor_id,)).
+    """, (doctor_id,)).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\doctor_slot_service.py =====
+from unittest import result
+
 from app.db import fetch_all, execute_query, fetch_one
 from datetime import datetime
 
 ALL_SLOTS = [
-    "8A","8B","9A","9B","10A","10B","11A","11B",
-    "13A","13B","14A","14B","15A","15B","16A","16B"
+    "8A",
+    "8B",
+    "9A",
+    "9B",
+    "10A",
+    "10B",
+    "11A",
+    "11B",
+    "13A",
+    "13B",
+    "14A",
+    "14B",
+    "15A",
+    "15B",
+    "16A",
+    "16B",
 ]
 
 
-def get_doctor_slots(doctor_id: int, slot_date: str):
+# ==============================
+# GET SLOTS FOR UI
+# ==============================
+def get_doctor_slots(doctor_id: str, slot_date: str):
     query = """
-        SELECT  slot_code, slot_status
-        FROM doctor_slot
-        WHERE doctor_id = %s
-        AND slot_date = %s;
-    """
+    SELECT 
+        ds.slot_id,
+        ds.slot_code,
+        CASE 
+            WHEN a.patient_id IS NOT NULL THEN 'BOOKED'
+            ELSE ds.slot_status
+        END AS slot_status,
+        a.patient_id
+    FROM doctor_slot ds
+    LEFT JOIN appointment a 
+        ON ds.slot_id = a.slot_id
+    WHERE ds.doctor_id = %s
+    AND ds.slot_date = %s;
+"""
 
     rows = fetch_all(query, (doctor_id, slot_date))
 
-
-
-    db_slots = {row["slot_code"]: row["slot_status"] for row in rows}
+    db_slots = {row["slot_code"]: row for row in rows}
 
     result = []
-    for slot in ALL_SLOTS:
-        status = db_slots.get(slot)
 
-        result.append({
-            "slot_code": slot,
-            "slot_status": status   # ❗ None nếu không tồn tại
-        })
-    # print("get_doctor_slots result:", result)x    
+    for slot in ALL_SLOTS:
+        row = db_slots.get(slot)
+
+        result.append(
+            {
+                "slot_id": row["slot_id"] if row else None,
+                "slot_code": slot,
+                "slot_status": row["slot_status"] if row else None,
+                "patient_id": row["patient_id"] if row else None,
+            }
+        )
+
     return result
 
-def get_patient_by_slot(doctor_id: int, slot_date: str, slot_code: str):
+def generate_slot_preview(doctor_id: str, year: int, month: int):
+    # ==============================
+    # FIX MONTH ROLLOVER
+    # ==============================
+    if month == 1:
+        prev_month = 12
+        prev_year = year - 1
+    else:
+        prev_month = month - 1
+        prev_year = year
+
+    prev_month_start = f"{prev_year}-{prev_month:02d}-01"
+    curr_month_start = f"{year}-{month:02d}-01"
+
+    query = """
+    SELECT
+        EXTRACT(ISODOW FROM slot_date) AS dow,
+        slot_code,
+        COUNT(*) AS cnt
+    FROM doctor_slot
+    WHERE doctor_id = %s
+      AND slot_status = 'AVAILABLE'
+      AND slot_date >= %s::date
+      AND slot_date < (%s::date)
+      AND EXTRACT(ISODOW FROM slot_date) BETWEEN 1 AND 6
+    GROUP BY dow, slot_code
+    """
+
+    rows = fetch_all(query, (doctor_id, prev_month_start, curr_month_start))
+
+    result = {}
+
+    for r in rows:
+        # 🔥 FIX KEY FORMAT (match frontend)
+        key = f"{int(r['dow'])}_{r['slot_code']}"
+
+        result[key] = "GREEN" if r["cnt"] >= 2 else "RED"
+
+    return result
+
+# ==============================
+# GET PATIENT FROM SLOT
+# ==============================
+def get_patient_by_slot(doctor_id: str, slot_date: str, slot_code: str):
     query = """
         SELECT a.patient_id
         FROM doctor_slot ds
@@ -2014,14 +2432,11 @@ def get_patient_by_slot(doctor_id: int, slot_date: str, slot_code: str):
 
     return fetch_one(query, (doctor_id, slot_date, slot_code))
 
-def get_all_slots():
-    return fetch_all("SELECT * FROM doctor_slot ORDER BY slot_id;")
 
-def get_slot_by_id(slot_id: int):
-    res = fetch_all("SELECT * FROM doctor_slot WHERE slot_id=%s;", (slot_id,))
-    return res[0] if res else None
-
-def get_slot_id(doctor_id: int, slot_date: str, slot_code: str):
+# ==============================
+# GET SLOT ID
+# ==============================
+def get_slot_id(doctor_id: str, slot_date: str, slot_code: str):
     query = """
         SELECT slot_id
         FROM doctor_slot
@@ -2032,181 +2447,214 @@ def get_slot_id(doctor_id: int, slot_date: str, slot_code: str):
 
     return fetch_one(query, (doctor_id, slot_date, slot_code))
 
-def create_slot(data: dict):
-    query = """
-    INSERT INTO doctor_slot (
-        slot_id, doctor_id, clinic_id, slot_date,
-        start_time, end_time, slot_status, slot_type,
-        max_capacity, created_at, updated_at
-    )
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW());
-    """
-    execute_query(query, (
-        data["slot_id"], data["doctor_id"], data.get("clinic_id"),
-        data["slot_date"], data["start_time"], data["end_time"],
-        data.get("slot_status","AVAILABLE"),
-        data.get("slot_type"),
-        data.get("max_capacity",1)
-    ))
 
-def update_slot(slot_id:int,data:dict):
-    query="""
-    UPDATE doctor_slot SET
-        doctor_id=%s, clinic_id=%s, slot_date=%s,
-        start_time=%s, end_time=%s,
-        slot_status=%s, slot_type=%s,
-        max_capacity=%s, updated_at=NOW()
-    WHERE slot_id=%s;
-    """
-    execute_query(query,(
-        data.get("doctor_id"),data.get("clinic_id"),data.get("slot_date"),
-        data.get("start_time"),data.get("end_time"),
-        data.get("slot_status"),data.get("slot_type"),
-        data.get("max_capacity"),slot_id
-    ))
-
-
-
-
-def upsert_doctor_slot(doctor_id: int, slot_date: str, slot_code: str, status: str):
-    # convert string → date
+# ==============================
+# UPSERT SLOT (CORE LOGIC)
+# ==============================
+def upsert_doctor_slot(doctor_id: str, slot_date: str, slot_code: str, status: str):
     slot_date_obj = datetime.strptime(slot_date, "%Y-%m-%d").date()
 
-    # 1. check tồn tại
-    check_query = """
+    existing = fetch_one(
+        """
         SELECT slot_id
         FROM doctor_slot
         WHERE doctor_id = %s
         AND slot_date = %s
         AND slot_code = %s;
-    """
-
-    existing = fetch_one(check_query, (doctor_id, slot_date_obj, slot_code))
+    """,
+        (doctor_id, slot_date_obj, slot_code),
+    )
 
     if existing:
-        # 2. UPDATE
-        update_query = """
-            UPDATE doctor_slot
-            SET slot_status = %s,
-                updated_at = NOW()
-            WHERE slot_id = %s;
-        """
-        execute_query(update_query, (status, existing["slot_id"]))
+        slot_id = existing["slot_id"]
 
-        return {
-            "message": "Slot updated",
-            "slot_id": existing["slot_id"]
-        }
+        # 🔥 CHECK nếu slot đang BOOKED
+        booked = fetch_one("""
+            SELECT 1
+            FROM appointment
+            WHERE slot_id = %s
+        """, (slot_id,))
+
+        if booked and status != "BOOKED":
+            raise Exception("Cannot change status of a booked slot")
+
+        execute_query(
+            """
+            UPDATE doctor_slot
+            SET slot_status = %s
+            WHERE slot_id = %s;
+        """,
+            (status, slot_id),
+        )
+
+        return {"message": "Slot updated", "slot_id": slot_id}
 
     else:
-        # 3. INSERT
-        insert_query = """
+        slot_id = f"{slot_date.replace('-', '')}{doctor_id}{slot_code}"
+
+        execute_query(
+            """
             INSERT INTO doctor_slot (
                 slot_id,
                 doctor_id,
-                clinic_id,
                 slot_date,
                 slot_code,
-                slot_status,
-                slot_type,
-                created_at,
-                updated_at
+                slot_status
             )
-            VALUES (
-                nextval('doctor_slot_slot_id_seq'),
-                %s,
-                1,
-                %s,
-                %s,
-                %s,
-                'CONSULTATION',
-                NOW(),
-                NOW()
-            )
-            RETURNING slot_id;
-        """
-
-        result = fetch_one(insert_query, (
-            doctor_id,
-            slot_date_obj,
-            slot_code,
-            status
-        ))
-
-        return {
-            "message": "Slot created",
-            "slot_id": result["slot_id"]
-        }
-        
-def delete_slot(slot_id:int):
-    execute_query("DELETE FROM doctor_slot WHERE slot_id=%s;",(slot_id,)).
-===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\medical_record_service.py =====
-from app.db import fetch_all, execute_query
-
-def get_all_records():
-    return fetch_all("SELECT * FROM medical_record;")
-
-def create_record(data:dict):
-    query="""
-    INSERT INTO medical_record(
-        record_id, appointment_id,
-        patient_id, doctor_id,
-        diagnosis_note, record_status,
-        created_at, updated_at
-    )
-    VALUES (%s,%s,%s,%s,%s,%s,NOW(),NOW());
-    """
-    execute_query(query,(
-        data["record_id"],data["appointment_id"],
-        data["patient_id"],data["doctor_id"],
-        data.get("diagnosis_note"),
-        data.get("record_status","DRAFT")
-    )).
-===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\patient_service.py =====
-from app.db import fetch_all, execute_query
-
-
-# 🔹 GET ALL
-def get_all_patients():
-    query = "SELECT * FROM patient ORDER BY patient_id;"
-    return fetch_all(query)
-
-
-# 🔹 GET BY ID
-def get_patient_by_id(patient_id: int):
-    query = "SELECT * FROM patient WHERE patient_id = %s;"
-    result = fetch_all(query, (patient_id,))
-    return result[0] if result else None
-
-
-# 🔹 CREATE
-def create_patient(data: dict):
-    query = """
-        INSERT INTO patient (
-            patient_id, patient_name, address, phone_number, email,
-            insurance_number, insurance_provider, date_of_birth,
-            gender, patient_status, created_at, updated_at
+            VALUES (%s, %s, %s, %s, %s);
+        """,
+            (slot_id, doctor_id, slot_date_obj, slot_code, status),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-    """
-    params = (
-        data["patient_id"],
+
+        return {"message": "Slot created", "slot_id": slot_id}
+
+# ==============================
+# DELETE
+# ==============================
+def delete_slot(slot_id: str):
+    execute_query("DELETE FROM doctor_slot WHERE slot_id = %s;", (slot_id,))
+.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\medical_record_service.py =====
+from app.db import fetch_all, fetch_one, execute_query
+
+
+# ==============================
+# GET ALL
+# ==============================
+def get_all_records():
+    return fetch_all("""
+        SELECT *
+        FROM medical_record
+        ORDER BY slot_id, patient_id, version_number;
+    """)
+
+
+# ==============================
+# GET LATEST RECORD
+# ==============================
+def get_latest_record(slot_id: str, patient_id: int):
+    return fetch_one("""
+        SELECT *
+        FROM medical_record
+        WHERE slot_id = %s
+        AND patient_id = %s
+        ORDER BY version_number DESC
+        LIMIT 1;
+    """, (slot_id, patient_id))
+
+
+# ==============================
+# CREATE / NEW VERSION
+# ==============================
+def create_record(data: dict):
+    slot_id = data["slot_id"]
+    patient_id = data["patient_id"]
+
+    # 🔥 get latest version
+    latest = fetch_one("""
+        SELECT MAX(version_number) as max_ver
+        FROM medical_record
+        WHERE slot_id = %s
+        AND patient_id = %s;
+    """, (slot_id, patient_id))
+
+    next_version = (latest["max_ver"] or 0) + 1
+
+    execute_query("""
+        INSERT INTO medical_record (
+            slot_id,
+            patient_id,
+            version_number,
+            diagnosis_note,
+            prescription_note,
+            created_at,
+            updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, NOW(), NOW());
+    """, (
+        slot_id,
+        patient_id,
+        next_version,
+        data.get("diagnosis_note"),
+        data.get("prescription_note")
+    ))
+
+    return {
+        "message": "Record created",
+        "version": next_version
+    }.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\patient_service.py =====
+from app.db import fetch_all, fetch_one, execute_query
+
+
+# ==============================
+# GET ALL
+# ==============================
+def get_all_patients():
+    return fetch_all("""
+        SELECT *
+        FROM patient
+        ORDER BY patient_id;
+    """)
+
+
+# ==============================
+# GET BY ID
+# ==============================
+def get_patient_by_id(patient_id: int):
+    return fetch_one("""
+        SELECT *
+        FROM patient
+        WHERE patient_id = %s;
+    """, (patient_id,))
+
+# ==============================
+# GET ALL INSURANCE NUMBERS
+# ==============================
+def get_all_insurance_numbers():
+    rows = fetch_all("""
+        SELECT insurance_number
+        FROM patient
+        WHERE insurance_number IS NOT NULL
+        ORDER BY insurance_number;
+    """)
+
+    # optional: return list thuần thay vì list dict
+    return rows
+
+# ==============================
+# CREATE
+# ==============================
+def create_patient(data: dict):
+    result = fetch_one("""
+        INSERT INTO patient (
+            patient_name,
+            address,
+            phone_number,
+            email,
+            insurance_number,
+            date_of_birth,
+            gender
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING patient_id;
+    """, (
         data["patient_name"],
         data.get("address"),
         data["phone_number"],
         data.get("email"),
         data.get("insurance_number"),
-        data.get("insurance_provider"),
         data.get("date_of_birth"),
-        data.get("gender"),
-        data.get("patient_status", "ACTIVE"),
-    )
-    execute_query(query, params)
+        data.get("gender")
+    ))
 
+    return result["patient_id"]
 
-# 🔹 UPDATE
+# ==============================
+# UPDATE
+# ==============================
 def update_patient(patient_id: int, data: dict):
-    query = """
+    execute_query("""
         UPDATE patient
         SET
             patient_name = %s,
@@ -2214,34 +2662,30 @@ def update_patient(patient_id: int, data: dict):
             phone_number = %s,
             email = %s,
             insurance_number = %s,
-            insurance_provider = %s,
             date_of_birth = %s,
             gender = %s,
-            patient_status = %s,
             updated_at = NOW()
         WHERE patient_id = %s;
-    """
-
-    params = (
+    """, (
         data.get("patient_name"),
         data.get("address"),
         data.get("phone_number"),
         data.get("email"),
         data.get("insurance_number"),
-        data.get("insurance_provider"),
         data.get("date_of_birth"),
         data.get("gender"),
-        data.get("patient_status"),
-        patient_id,
-    )
-
-    execute_query(query, params)
+        patient_id
+    ))
 
 
-# 🔹 DELETE
+# ==============================
+# DELETE
+# ==============================
 def delete_patient(patient_id: int):
-    query = "DELETE FROM patient WHERE patient_id = %s;"
-    execute_query(query, (patient_id,)).
+    execute_query("""
+        DELETE FROM patient
+        WHERE patient_id = %s;
+    """, (patient_id,)).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\payment_service.py =====
 from app.db import fetch_all, execute_query
 
@@ -2264,6 +2708,168 @@ def create_payment(data:dict):
         data.get("amount_patient_responsibility",0),
         data.get("payment_status","PENDING")
     )).
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\schedule_service.py =====
+from app.db import fetch_all, fetch_one, execute_query
+from datetime import datetime
+
+# ==============================
+# CHECK MONTH STATUS
+# ==============================
+def get_month_status(doctor_id: str, year: int, month: int):
+    return fetch_one("""
+        SELECT is_inserted
+        FROM doctor_insert_month
+        WHERE doctor_id = %s
+        AND year = %s
+        AND month = %s
+    """, (doctor_id, year, month))
+
+
+# ==============================
+# GENERATE PREVIEW
+# ==============================
+def generate_preview(doctor_id: str, year: int, month: int):
+    prev_month = month - 1
+    prev_year = year
+
+    if prev_month == 0:
+        prev_month = 12
+        prev_year -= 1
+
+    start = f"{prev_year}-{prev_month:02d}-01"
+    end = f"{year}-{month:02d}-01"
+
+    rows = fetch_all("""
+        SELECT
+            EXTRACT(ISODOW FROM slot_date) AS dow,
+            slot_code,
+            COUNT(*) AS cnt
+        FROM doctor_slot
+        WHERE doctor_id = %s
+        AND slot_status = 'AVAILABLE'
+        AND slot_date >= %s
+        AND slot_date < %s
+        AND EXTRACT(ISODOW FROM slot_date) BETWEEN 1 AND 6
+        GROUP BY dow, slot_code
+    """, (doctor_id, start, end))
+
+    result = {}
+
+    for r in rows:
+        key = f"{int(r['dow'])}_{r['slot_code']}"
+        result[key] = "GREEN" if r["cnt"] >= 2 else "RED"
+
+    return result
+
+
+# ==============================
+# CONFIRM GENERATE
+# ==============================
+def confirm_generate(doctor_id: str, year: int, month: int, slots: list):
+    from datetime import date, timedelta
+
+    # ==============================
+    # CHECK ALREADY INSERTED
+    # ==============================
+    check = fetch_one("""
+        SELECT is_inserted
+        FROM doctor_insert_month
+        WHERE doctor_id = %s
+        AND year = %s
+        AND month = %s
+    """, (doctor_id, year, month))
+
+    if check and check["is_inserted"]:
+        return {"message": "Already generated"}
+
+    # ==============================
+    # GENERATE ALL DAYS IN MONTH
+    # ==============================
+    start_date = date(year, month, 1)
+
+    if month == 12:
+        end_date = date(year + 1, 1, 1)
+    else:
+        end_date = date(year, month + 1, 1)
+
+    delta = end_date - start_date
+
+    insert_rows = []
+
+    for i in range(delta.days):
+        current_date = start_date + timedelta(days=i)
+
+        dow = current_date.isoweekday()  # 1-7
+
+        # ❌ skip Sunday
+        if dow == 7:
+            continue
+
+        for s in slots:
+            if s["dow"] != dow:
+                continue
+
+            slot_code = s["slot_code"]
+
+            # 🔥 SLOT_ID FORMAT
+            slot_id = f"{current_date.strftime('%Y%m%d')}{doctor_id}{slot_code}"
+
+            insert_rows.append((
+                slot_id,
+                doctor_id,
+                current_date,
+                slot_code,
+                "AVAILABLE"
+            ))
+
+    # ==============================
+    # INSERT BATCH
+    # ==============================
+    if insert_rows:
+        from psycopg2.extras import execute_values
+        from app.db import get_app_connection
+
+        conn = get_app_connection()
+
+        try:
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO doctor_slot (
+                        slot_id,
+                        doctor_id,
+                        slot_date,
+                        slot_code,
+                        slot_status
+                    )
+                    VALUES %s
+                    ON CONFLICT (slot_id) DO NOTHING;
+                    """,
+                    insert_rows
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ==============================
+    # MARK INSERTED
+    # ==============================
+    execute_query("""
+        INSERT INTO doctor_insert_month (
+            doctor_id,
+            year,
+            month,
+            is_inserted
+        )
+        VALUES (%s, %s, %s, TRUE)
+        ON CONFLICT (doctor_id, year, month)
+        DO UPDATE SET is_inserted = TRUE;
+    """, (doctor_id, year, month))
+
+    return {"message": "Generated successfully"}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\__pycache__\payment_service.py =====
 from app.db import fetch_all, execute_query
 

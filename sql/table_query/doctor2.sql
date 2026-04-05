@@ -1,1 +1,1 @@
-select * from doctor    
+select * from doctor where doctor_id = 'DR001';    

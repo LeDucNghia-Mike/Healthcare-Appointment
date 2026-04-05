@@ -2,7 +2,22 @@ from pathlib import Path
 from app.db import get_admin_connection, get_app_connection
 from app.config import PG_APP_DB
 
+def init_database():
+    sql = Path("sql/init_db.sql").read_text()
 
+    conn = get_admin_connection()
+    conn.autocommit = True
+
+    try:
+        with conn.cursor() as cur:
+            for statement in sql.split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    cur.execute(stmt)
+            print("Drop and Create DB Healthcare done")
+    finally:
+        conn.close()
+        
 def create_database():
     # explanation: Tạo application database nếu chưa tồn tại.
     conn = get_admin_connection()
@@ -37,5 +52,6 @@ def create_schema():
 
 
 if __name__ == "__main__":
-    create_database()
+    # create_database()
     create_schema()
+    init_database()

@@ -1,3 +1,1 @@
-SELECT doctor_id, specialty
-FROM doctor
-WHERE doctor_id = 1;
+select * from calendar_day where date = date('2026-04-27');

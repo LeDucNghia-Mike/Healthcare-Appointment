@@ -1,1 +1,1 @@
-select last_value from patient_seq;
+select * from patient where patient_id >= 12900;

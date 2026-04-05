@@ -84,50 +84,88 @@ export default function AuthLayout({
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { INSURANCE_PREFIX } from "@/app/constants/insurances";
 
 export default function LoginPage() {
   const [role, setRole] = useState<"doctor" | "patient">("patient");
-  const [id, setId] = useState("");
+
+  // doctor
+  const [doctorId, setDoctorId] = useState("");
+
+  // patient insurance
+  const [prefix, setPrefix] = useState("GD");
+  const [insuranceNumber, setInsuranceNumber] = useState("");
+
   const router = useRouter();
 
   const handleLogin = async () => {
     try {
-      if (!id) {
-        alert("Please enter ID");
+      // ======================
+      // DOCTOR LOGIN
+      // ======================
+      if (role === "doctor") {
+        if (!doctorId) {
+          alert("Please enter Doctor ID");
+          return;
+        }
+
+        if (!doctorId.startsWith("DR")) {
+          alert("Doctor ID must be like DR001");
+          return;
+        }
+
+        const res = await fetch(`http://127.0.0.1:8000/auth/login/doctor`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ doctor_id: doctorId }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data.message || "Login failed");
+          return;
+        }
+
+        localStorage.setItem("role", "doctor");
+        localStorage.setItem("user_id", doctorId);
+
+        router.push("/dashboard/doctor/slots");
         return;
       }
 
-      // 🔥 validate nhẹ
-      if (role === "doctor" && !id.startsWith("DR")) {
-        alert("Doctor ID must be like DR001");
+      // ======================
+      // PATIENT LOGIN (INSURANCE)
+      // ======================
+
+      if (!/^\d{13}$/.test(insuranceNumber)) {
+        alert("Insurance number must be 13 digits");
         return;
       }
 
-      const res = await fetch(`http://127.0.0.1:8000/auth/login/${role}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          [`${role}_id`]: id,
-        }),
-      });
+      const fullInsurance = prefix + insuranceNumber;
+
+      // 🔥 check tồn tại bằng API
+      // 🔥 LẤY patient_id TRỰC TIẾP
+      const res = await fetch(
+        `http://127.0.0.1:8000/patients/by-insurance/${fullInsurance}`,
+      );
 
       const data = await res.json();
 
-      if (!res.ok) {
-        alert(data.message || "Login failed");
+      if (!res.ok || !data?.patient_id) {
+        alert("Insurance number not found");
         return;
       }
 
-      localStorage.setItem("role", role);
-      localStorage.setItem("user_id", id);
+      // ✅ lưu cả 2
+      localStorage.setItem("role", "patient");
+      localStorage.setItem("user_insurance", fullInsurance);
+      localStorage.setItem("user_id", String(data.patient_id)); // 🔥 thêm dòng này
 
-      if (role === "doctor") {
-        router.push("/dashboard/doctor/slots");
-      } else {
-        router.push("/dashboard/patient");
-      }
+      router.push("/dashboard/patient");
     } catch (err) {
       console.error("Login error:", err);
       alert("Server error");
@@ -137,32 +175,72 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-white">
       <div className="w-[350px] space-y-6">
+        {/* TOGGLE */}
         <div className="flex border rounded-lg overflow-hidden">
           <button
             onClick={() => setRole("patient")}
-            className={`w-1/2 py-2 ${role === "patient" ? "bg-black text-white" : ""}`}
+            className={`w-1/2 py-2 ${
+              role === "patient" ? "bg-black text-white" : ""
+            }`}
           >
             Patient
           </button>
           <button
             onClick={() => setRole("doctor")}
-            className={`w-1/2 py-2 ${role === "doctor" ? "bg-black text-white" : ""}`}
+            className={`w-1/2 py-2 ${
+              role === "doctor" ? "bg-black text-white" : ""
+            }`}
           >
             Doctor
           </button>
         </div>
 
-        <h1 className="text-xl font-semibold text-center">
-          Login as {role} (ID)
-        </h1>
+        <h1 className="text-xl font-semibold text-center">Login as {role}</h1>
 
-        <input
-          type="text"
-          placeholder={role === "doctor" ? "DR001" : "1"}
-          className="w-full border p-2 rounded"
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-        />
+        {/* ===================== */}
+        {/* DOCTOR */}
+        {/* ===================== */}
+        {role === "doctor" && (
+          <div>
+            <label className="block mb-1">Doctor ID</label>
+            <input
+              type="text"
+              placeholder="DR001"
+              className="w-full border p-2 rounded"
+              value={doctorId}
+              onChange={(e) => setDoctorId(e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* ===================== */}
+        {/* PATIENT */}
+        {/* ===================== */}
+        {role === "patient" && (
+          <div>
+            <label className="block mb-1">Patient Insurance</label>
+
+            <div className="flex gap-2">
+              <select
+                className="border p-2 rounded"
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value)}
+              >
+                {INSURANCE_PREFIX.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                placeholder="13 digits"
+                className="flex-1 border p-2 rounded"
+                value={insuranceNumber}
+                onChange={(e) => setInsuranceNumber(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         <button
           onClick={handleLogin}
@@ -173,61 +251,125 @@ export default function LoginPage() {
       </div>
     </main>
   );
-}.
+}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\auth\register\page.tsx =====
 "use client";
 
-import { useState } from "react";
-import { SPECIALTIES, type Specialty } from "@/app/constants/specialties";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+import { INSURANCE_PREFIX } from "@/app/constants/insurances";
 
 export default function RegisterPage() {
-  const [role, setRole] = useState<"doctor" | "patient">("patient");
+  const router = useRouter();
 
   const [name, setName] = useState("");
-
-  // doctor
-  const [specialty, setSpecialty] = useState<Specialty>(SPECIALTIES[0]);
-
-  // patient
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
-  const [insurance, setInsurance] = useState("");
+
+  // insurance split
+  const [insurancePrefix, setInsurancePrefix] = useState("GD");
+  const [insuranceNumber, setInsuranceNumber] = useState("");
+
   const [dob, setDob] = useState("");
   const [gender, setGender] = useState("");
 
-  const handleRegister = async () => {
-    let payload;
+  const [existingInsurance, setExistingInsurance] = useState<string[]>([]);
 
-    if (role === "doctor") {
-      payload = {
-        doctor_name: name,
-        specialty,
-        start_working_date: new Date().toISOString().split("T")[0], // 🔥 today
-      };
-    } else {
-      payload = {
-        patient_name: name,
-        phone_number: phone,
-        address,
-        email,
-        insurance_number: insurance,
-        date_of_birth: dob,
-        gender,
-      };
+  // 🔥 fetch existing insurance
+  useEffect(() => {
+    fetch("http://127.0.0.1:8000/patients/insurance-numbers/all")
+      .then((res) => res.json())
+      .then((data) => {
+        type InsuranceItem = {
+          insurance_number: string;
+        };
+
+        let list: string[] = [];
+
+        if (Array.isArray(data)) {
+          list = data.map((i: InsuranceItem) => i.insurance_number);
+        } else if (Array.isArray(data.data)) {
+          list = data.data.map((i: InsuranceItem) => i.insurance_number);
+        } else {
+          console.error("Unexpected API format:", data);
+        }
+
+        setExistingInsurance(list);
+        setExistingInsurance(list);
+      })
+      .catch(console.error);
+  }, []);
+
+  const validate = () => {
+    // phone
+    if (!/^0\d{9}$/.test(phone)) {
+      alert("Phone must be 10 digits and start with 0");
+      return false;
     }
 
+    // email
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert("Invalid email");
+      return false;
+    }
+
+    // insurance 13 digits
+    if (!/^\d{13}$/.test(insuranceNumber)) {
+      alert("Insurance number must be 13 digits");
+      return false;
+    }
+
+    const fullInsurance = insurancePrefix + insuranceNumber;
+
+    if (existingInsurance.includes(fullInsurance)) {
+      alert("Insurance already exists");
+      return false;
+    }
+
+    // gender
+    if (!["male", "female"].includes(gender)) {
+      alert("Gender must be male or female");
+      return false;
+    }
+
+    // dob
+    const year = new Date(dob).getFullYear();
+    const currentYear = new Date().getFullYear();
+
+    if (year > currentYear - 10) {
+      alert(`DOB must be before ${currentYear - 10}`);
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleRegister = async () => {
+    if (!validate()) return;
+
+    const fullInsurance = insurancePrefix + insuranceNumber;
+
+    const payload = {
+      patient_name: name,
+      phone_number: phone,
+      address,
+      email,
+      insurance_number: fullInsurance,
+      date_of_birth: dob,
+      gender,
+    };
+
     try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/${role === "doctor" ? "doctors" : "patients"}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const res = await fetch("http://127.0.0.1:8000/patients", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
       const data = await res.json();
 
@@ -235,8 +377,12 @@ export default function RegisterPage() {
         alert(data.message || "Register failed");
         return;
       }
+      alert(`Registered successfully with insurance ${fullInsurance}`);
+      localStorage.setItem("user_insurance", fullInsurance);
+      localStorage.setItem("user_id", String(data.patient_id));
+      localStorage.setItem("role", "patient");
 
-      alert("Registered successfully!");
+      router.push("/dashboard/patient");
     } catch (err) {
       console.error(err);
       alert("Server error");
@@ -244,104 +390,98 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-white">
-      <div className="w-[350px] space-y-6">
-
-        {/* Toggle */}
-        <div className="flex border rounded-lg overflow-hidden">
-          <button
-            onClick={() => setRole("patient")}
-            className={`w-1/2 py-2 ${role === "patient" ? "bg-black text-white" : ""}`}
-          >
-            Patient
-          </button>
-          <button
-            onClick={() => setRole("doctor")}
-            className={`w-1/2 py-2 ${role === "doctor" ? "bg-black text-white" : ""}`}
-          >
-            Doctor
-          </button>
-        </div>
-
+    <main className="min-h-screen flex items-center justify-center bg-white">
+      <div className="w-[350px] space-y-4">
         <h1 className="text-xl font-semibold text-center">
-          Register as {role}
+          Register as Patient
         </h1>
 
-        <div className="space-y-4">
-
-          {/* COMMON */}
+        {/* NAME */}
+        <div>
+          <label>Name</label>
           <input
-            type="text"
-            placeholder="Name"
             className="w-full border p-2 rounded"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
+        </div>
 
-          {/* DOCTOR */}
-          {role === "doctor" && (
+        {/* PHONE */}
+        <div>
+          <label>Phone</label>
+          <input
+            className="w-full border p-2 rounded"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+        </div>
+
+        {/* ADDRESS */}
+        <div>
+          <label>Address</label>
+          <input
+            className="w-full border p-2 rounded"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+          />
+        </div>
+
+        {/* EMAIL */}
+        <div>
+          <label>Email</label>
+          <input
+            className="w-full border p-2 rounded"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+
+        {/* INSURANCE */}
+        <div>
+          <label>Insurance</label>
+          <div className="flex gap-2">
             <select
-              className="w-full border p-2 rounded"
-              value={specialty}
-              onChange={(e) => setSpecialty(e.target.value as Specialty)}
+              className="border p-2 rounded"
+              value={insurancePrefix}
+              onChange={(e) => setInsurancePrefix(e.target.value)}
             >
-              {SPECIALTIES.map((s) => (
-                <option key={s}>{s}</option>
+              {INSURANCE_PREFIX.map((p) => (
+                <option key={p}>{p}</option>
               ))}
             </select>
-          )}
 
-          {/* PATIENT */}
-          {role === "patient" && (
-            <>
-              <input
-                type="text"
-                placeholder="Phone number"
-                className="w-full border p-2 rounded"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
+            <input
+              className="flex-1 border p-2 rounded"
+              placeholder="13 digits"
+              value={insuranceNumber}
+              onChange={(e) => setInsuranceNumber(e.target.value)}
+            />
+          </div>
+        </div>
 
-              <input
-                type="text"
-                placeholder="Address"
-                className="w-full border p-2 rounded"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-              />
+        {/* DOB */}
+        <div>
+          <label>Date of Birth</label>
+          <input
+            type="date"
+            className="w-full border p-2 rounded"
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+          />
+        </div>
 
-              <input
-                type="email"
-                placeholder="Email"
-                className="w-full border p-2 rounded"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-
-              <input
-                type="text"
-                placeholder="Insurance number"
-                className="w-full border p-2 rounded"
-                value={insurance}
-                onChange={(e) => setInsurance(e.target.value)}
-              />
-
-              <input
-                type="date"
-                className="w-full border p-2 rounded"
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-              />
-
-              <input
-                type="text"
-                placeholder="Gender"
-                className="w-full border p-2 rounded"
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-              />
-            </>
-          )}
+        {/* GENDER */}
+        <div>
+          <label>Gender</label>
+          <select
+            className="w-full border p-2 rounded"
+            value={gender}
+            onChange={(e) => setGender(e.target.value)}
+          >
+            <option value="">Select</option>
+            <option value="male">male</option>
+            <option value="female">female</option>
+          </select>
         </div>
 
         <button
@@ -350,11 +490,11 @@ export default function RegisterPage() {
         >
           Register
         </button>
-
       </div>
     </main>
   );
-}.
+}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\layout.tsx =====
 "use client";
 
@@ -371,58 +511,76 @@ export default function DashboardLayout({
   const [mounted, setMounted] = useState(false);
   const [role, setRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [insurance, setInsurance] = useState<string | null>(null);
+  const getTodayFormatted = () => {
+    const today = new Date();
+
+    const day = String(today.getDate()).padStart(2, "0");
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const year = today.getFullYear();
+
+    return `${day}/${month}/${year}`;
+  };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
 
     const r = localStorage.getItem("role");
     const id = localStorage.getItem("user_id");
+    const ins = localStorage.getItem("user_insurance");
 
     if (!r || !id) {
       router.push("/auth/login");
     } else {
       setRole(r);
       setUserId(id);
+      setInsurance(ins);
     }
   }, [router]);
 
-  // ❗ QUAN TRỌNG: tránh mismatch
   if (!mounted || !role || !userId) return null;
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <div className="flex justify-between items-center p-4 bg-white shadow">
+      {/* HEADER */}
+      <div className="grid grid-cols-3 items-center p-4 bg-white shadow">
+        {/* LEFT */}
         <div className="font-medium">
-          {role === "doctor" ? "Doctor" : "Patient"} ID: {userId}
+          {role === "doctor"
+            ? `Doctor ID: ${userId}`
+            : `Patient Insurance: ${insurance}`}
         </div>
 
-        <button
-          onClick={() => {
-            localStorage.clear();
-            router.push("/auth/login");
-          }}
-          className="px-4 py-2 bg-black text-white rounded"
-        >
-          Logout
-        </button>
+        {/* CENTER */}
+        <div className="text-xl font-semibold text-gray-700 text-center">
+          Date: {getTodayFormatted()}
+        </div>
+
+        {/* RIGHT */}
+        <div className="flex justify-end">
+          <button
+            onClick={() => {
+              localStorage.clear();
+              router.push("/auth/login");
+            }}
+            className="px-4 py-2 bg-black text-white rounded"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
+      {/* CONTENT */}
       <div className="p-6">{children}</div>
     </div>
   );
-}.
+}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\layout.tsx =====
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-
-type Doctor = {
-  doctor_id: number;
-  doctor_name: string;
-  specialty: string;
-};
 
 export default function DoctorLayout({
   children,
@@ -432,81 +590,65 @@ export default function DoctorLayout({
   const router = useRouter();
   const pathname = usePathname();
 
-  const [mounted, setMounted] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [doctor, setDoctor] = useState<Doctor | null>(null);
-  const [loadingDoctor, setLoadingDoctor] = useState(true);
-
-  // 🔐 Effect 1: Auth + lấy userId
-  useEffect(() => {
-    setMounted(true);
+  // ✅ init state từ localStorage (không cần setState trong effect)
+  const [userId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
 
     const role = localStorage.getItem("role");
     const id = localStorage.getItem("user_id");
 
     if (!role || !id || role !== "doctor") {
-      router.replace("/auth/login");
-      return;
+      return null;
     }
 
-    setUserId(id);
-  }, [router]);
+    return id;
+  });
 
-  // 📡 Effect 2: fetch doctor (🔥 đúng dependency)
+  // ✅ chỉ dùng effect để redirect (side-effect đúng nghĩa)
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      router.replace("/auth/login");
+    }
+  }, [userId, router]);
 
-    const fetchDoctor = async () => {
-      try {
-        const res = await fetch(
-          `http://127.0.0.1:8000/doctors/${userId}`, // ⚠️ nhớ đúng endpoint
-        );
-
-        if (!res.ok) {
-          console.error("Doctor fetch failed:", res.status);
-          return;
-        }
-
-        const data: Doctor = await res.json();
-        console.log("Doctor data:", data);
-
-        setDoctor(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoadingDoctor(false);
-      }
-    };
-
-    fetchDoctor();
-  }, [userId]);
-
-  // 🔒 tránh hydration mismatch
-  if (!mounted || !userId) return null;
+  if (!userId) return null;
 
   return (
-    <div className="flex gap-2">
-      <button
-        onClick={() => router.push("/dashboard/doctor/slots")}
-        className={`px-4 py-1 rounded ${
-          pathname.includes("slots") ? "bg-black text-white" : "bg-gray-200"
-        }`}
-      >
-        Manage Slots
-      </button>
+    <div className="space-y-4">
+      <div className="flex gap-2">
 
-      <button
-        onClick={() => router.push("/dashboard/doctor/history")}
-        className={`px-4 py-1 rounded ${
-          pathname.includes("history") ? "bg-black text-white" : "bg-gray-200"
-        }`}
-      >
-        Booking History
-      </button>
+        <button
+          onClick={() => router.push("/dashboard/doctor/slots")}
+          className={`px-4 py-1 rounded ${
+            pathname.includes("slots") ? "bg-black text-white" : "bg-gray-200"
+          }`}
+        >
+          Manage Slots
+        </button>
+
+        <button
+          onClick={() => router.push("/dashboard/doctor/history")}
+          className={`px-4 py-1 rounded ${
+            pathname.includes("history") ? "bg-black text-white" : "bg-gray-200"
+          }`}
+        >
+          Booking History
+        </button>
+
+        <button
+          onClick={() => router.push("/dashboard/doctor/generate")}
+          className={`px-4 py-1 rounded ${
+            pathname.includes("generate") ? "bg-black text-white" : "bg-gray-200"
+          }`}
+        >
+          Generate Schedule
+        </button>
+      </div>
+
+      <div>{children}</div>
     </div>
   );
-}
-.
+}.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\page.tsx =====
 "use client";
 
@@ -522,10 +664,188 @@ export default function DoctorPage() {
 
   return null;
 }.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\generate\page.tsx =====
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import React from "react";
+
+import { DAYS, DAY_LABEL } from "@/app/constants/date";
+import { SLOT_MAP, SlotCode } from "@/app/constants/slots";
+
+export default function GeneratePage() {
+  // ==============================
+  // STATE
+  // ==============================
+  const [grid, setGrid] = useState<Record<string, string>>({});
+  const [isLocked, setIsLocked] = useState(false);
+
+  // ✅ stable userId (tránh re-render không cần thiết)
+  const userId = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("user_id");
+  }, []);
+
+  // ✅ derive SLOTS từ SLOT_MAP
+  const SLOTS = useMemo(() => Object.keys(SLOT_MAP) as SlotCode[], []);
+
+  const { year, month } = useMemo(() => {
+    const now = new Date();
+
+    let m = now.getMonth() + 1; // JS: 0-11 → +1 = 1-12
+    let y = now.getFullYear();
+
+    // +2 months
+    m += 2;
+
+    if (m > 12) {
+      m -= 12;
+      y += 1;
+    }
+
+    return { year: y, month: m };
+  }, []);
+
+  // ==============================
+  // FETCH DATA
+  // ==============================
+  useEffect(() => {
+    if (!userId) return;
+
+    // preview
+    fetch(`http://127.0.0.1:8000/schedule/preview/${userId}/${year}/${month}`)
+      .then((res) => res.json())
+      .then((data) => setGrid(data));
+
+    // lock check
+    fetch(`http://127.0.0.1:8000/schedule/status/${userId}/${year}/${month}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.is_inserted) setIsLocked(true);
+      });
+  }, [userId]);
+
+  // ==============================
+  // TOGGLE
+  // ==============================
+  const toggle = (key: string) => {
+    if (isLocked) return;
+
+    setGrid((prev) => ({
+      ...prev,
+      [key]: prev[key] === "GREEN" ? "RED" : "GREEN",
+    }));
+  };
+
+  // ==============================
+  // CONFIRM
+  // ==============================
+  const handleConfirm = async () => {
+    if (!userId || isLocked) return;
+
+    const slots: { dow: number; slot_code: string }[] = [];
+
+    for (const key in grid) {
+      if (grid[key] === "GREEN") {
+        const [dow, slot_code] = key.split("_");
+        slots.push({
+          dow: Number(dow),
+          slot_code,
+        });
+      }
+    }
+
+    await fetch("http://127.0.0.1:8000/schedule/confirm", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        doctor_id: userId,
+        year,
+        month,
+        slots,
+      }),
+    });
+
+    alert("Schedule generated!");
+    setIsLocked(true);
+  };
+
+  // ==============================
+  // UI
+  // ==============================
+  if (!userId) return <div>Loading...</div>;
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">
+        Generate Schedule ({month}/{year})
+      </h1>
+
+      {isLocked && (
+        <div className="text-red-500 font-semibold">
+          🔒 This month is locked
+        </div>
+      )}
+
+      <div className="grid grid-cols-7 gap-2">
+        {/* Header */}
+        <div></div>
+        {DAY_LABEL.map((d) => (
+          <div key={d} className="text-center font-semibold">
+            {d}
+          </div>
+        ))}
+
+        {/* Grid */}
+        {SLOTS.map((slot) => (
+          <React.Fragment key={slot}>
+            {/* Slot label + time */}
+            <div className="font-semibold">
+              {slot}
+              <div className="text-xs text-gray-500">{SLOT_MAP[slot]}</div>
+            </div>
+
+            {DAYS.map((d) => {
+              const key = `${d}_${slot}`;
+              const value = grid[key] || "RED";
+
+              return (
+                <div
+                  key={key}
+                  onClick={() => toggle(key)}
+                  className={`p-3 text-center cursor-pointer ${
+                    value === "GREEN" ? "bg-green-400" : "bg-red-400"
+                  } ${isLocked ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {value}
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {!isLocked && (
+        <div className="flex justify-center mt-4">
+          <button
+            onClick={handleConfirm}
+            className="bg-black text-white px-6 py-2 rounded"
+          >
+            Confirm
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\app\dashboard\doctor\history\page.tsx =====
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Appointment = {
   patient_id: number;
@@ -536,8 +856,19 @@ type Appointment = {
 
 export default function DoctorHistoryPage() {
   const [data, setData] = useState<Appointment[]>([]);
+  const [filteredData, setFilteredData] = useState<Appointment[]>([]);
   const [doctorId] = useState(() => localStorage.getItem("user_id"));
 
+  // filter
+  const [selectedDate, setSelectedDate] = useState("");
+
+  // pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
+  const router = useRouter();
+
+  // 📡 fetch data
   useEffect(() => {
     if (!doctorId) return;
 
@@ -546,27 +877,129 @@ export default function DoctorHistoryPage() {
         `http://127.0.0.1:8000/appointments/appointments/doctor/${doctorId}`
       );
 
+      if (!res.ok) {
+        console.error("API error:", res.status);
+        return;
+      }
+
       const d = await res.json();
 
       if (Array.isArray(d)) {
         setData(d);
+        setFilteredData(d); // init
       }
     };
 
     fetchData();
   }, [doctorId]);
 
+  // 🔍 filter by date
+  const handleFilter = () => {
+    if (!selectedDate) {
+      setFilteredData(data);
+      setCurrentPage(1);
+      return;
+    }
+
+    const filtered = data.filter(
+      (item) => item.slot_date === selectedDate
+    );
+
+    setFilteredData(filtered);
+    setCurrentPage(1);
+  };
+
+  // 🔄 reset filter
+  const handleReset = () => {
+    setSelectedDate("");
+    setFilteredData(data);
+    setCurrentPage(1);
+  };
+
+  // 📄 pagination logic
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const currentData = filteredData.slice(
+    startIndex,
+    startIndex + itemsPerPage
+  );
+
+  // 🔥 navigation
+  const handleClick = (item: Appointment) => {
+    localStorage.setItem("doctor_slot_date", item.slot_date);
+    router.push("/dashboard/doctor/slots");
+  };
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Patient Bookings</h1>
 
-      {data.map((item, idx) => (
-        <div key={idx} className="card">
-          <div><b>Date:</b> {item.slot_date}</div>
-          <div><b>Slot:</b> {item.slot_code}</div>
-          <div><b>Patient:</b> {item.patient_id}</div>
+      {/* 🔍 FILTER */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="date"
+          className="border p-2"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+        />
+
+        <button
+          onClick={handleFilter}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          Confirm
+        </button>
+
+        <button
+          onClick={handleReset}
+          className="bg-gray-300 px-4 py-2 rounded"
+        >
+          Reset
+        </button>
+      </div>
+
+      {/* 📋 LIST */}
+      {currentData.length === 0 ? (
+        <div className="text-gray-500">No data</div>
+      ) : (
+        currentData.map((item, idx) => (
+          <div
+            key={idx}
+            className="border p-3 cursor-pointer hover:shadow-md transition"
+            onClick={() => handleClick(item)}
+          >
+            <div><b>Date:</b> {item.slot_date}</div>
+            <div><b>Slot:</b> {item.slot_code}</div>
+            <div><b>Patient:</b> {item.patient_id}</div>
+          </div>
+        ))
+      )}
+
+      {/* 📄 PAGINATION */}
+      {totalPages > 1 && (
+        <div className="flex gap-2 mt-4 items-center">
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((p) => p - 1)}
+            className="px-3 py-1 border disabled:opacity-50"
+          >
+            Prev
+          </button>
+
+          <span>
+            Page {currentPage} / {totalPages}
+          </span>
+
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => p + 1)}
+            className="px-3 py-1 border disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
-      ))}
+      )}
     </div>
   );
 }.
@@ -719,18 +1152,18 @@ export default function SlotPage() {
         {Object.entries(SLOT_MAP).map(([slot, time]) => {
           const status = slots[slot];
 
-          // ❌ NOT AVAILABLE
+          // ❌ NOT AVAILABLE → PINK
           if (!status) {
             return (
-              <div key={slot} className="border p-3 bg-gray-100">
+              <div key={slot} className="border p-3 bg-pink-100">
                 <div>{slot}</div>
                 <div>{time}</div>
-                <div className="text-red-500">NOT AVAILABLE</div>
+                <div className="text-red-500 font-semibold">NOT AVAILABLE</div>
               </div>
             );
           }
 
-          // 🔥 BOOKED
+          // 🔥 BOOKED → YELLOW
           if (status === "BOOKED") {
             return (
               <div key={slot} className="border p-3 bg-yellow-50 space-y-2">
@@ -738,19 +1171,12 @@ export default function SlotPage() {
                 <div>{time}</div>
                 <div className="text-red-500 font-bold">BOOKED</div>
 
-                {/* <button
-                  onClick={() => handleViewPatient(slot)}
-                  className="text-blue-600 underline"
-                >
-                  View Patient
-                </button> */}
-
                 {patientMap[slot] && <div>Patient: {patientMap[slot]}</div>}
               </div>
             );
           }
 
-          // ⛔ PAST
+          // ⛔ PAST → GRAY LOCKED
           if (isPastOrToday(date)) {
             return (
               <div key={slot} className="border p-3 bg-gray-100">
@@ -762,14 +1188,20 @@ export default function SlotPage() {
             );
           }
 
-          // ✅ NORMAL
+          // 🎨 STATUS COLOR LOGIC
+          let bgColor = "";
+          if (status === "AVAILABLE") bgColor = "bg-green-100";
+          if (status === "BLOCKED") bgColor = "bg-gray-200";
+
+          // ✅ NORMAL (EDITABLE)
           return (
-            <div key={slot} className="border p-3">
+            <div key={slot} className={`border p-3 ${bgColor}`}>
               <div>{slot}</div>
               <div>{time}</div>
-              <div>{status}</div>
+              <div className="font-medium">{status}</div>
 
               <select
+                className="border p-1 rounded"
                 value={status}
                 onChange={(e) =>
                   handleUpdate(slot, e.target.value as SlotStatus)
@@ -944,30 +1376,36 @@ export default function PatientPage() {
 
 import { useEffect, useState } from "react";
 import { SLOT_MAP } from "@/app/constants/slots";
-type SlotStatus = "AVAILABLE" | "BOOKED" | "BLOCKED";
+
+type SlotStatus = "AVAILABLE" | "BOOKED" | "NOT_AVAILABLE";
+
 const getToday = () => {
   return new Date().toISOString().split("T")[0];
 };
+
 export default function PatientBookingPage() {
   const [doctorId, setDoctorId] = useState<string | null>(null);
+  const [insurance, setInsurance] = useState<string | null>(null);
   const [patientId, setPatientId] = useState<string | null>(null);
+
   const [date, setDate] = useState<string>(() => {
     if (typeof window === "undefined") return "";
-
     const saved = localStorage.getItem("patient_selected_date");
-
     return saved ? saved : getToday();
   });
+
   const [slots, setSlots] = useState<Record<string, SlotStatus>>({});
   const [slotOwners, setSlotOwners] = useState<Record<string, string>>({});
   const [slotIds, setSlotIds] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+
   // =========================
   // INIT USER DATA
   // =========================
   useEffect(() => {
     setDoctorId(localStorage.getItem("selected_doctor_id"));
-    setPatientId(localStorage.getItem("user_id"));
+    setInsurance(localStorage.getItem("user_insurance"));
+    setPatientId(localStorage.getItem("user_id")); // 🔥 thêm
   }, []);
 
   // =========================
@@ -976,20 +1414,24 @@ export default function PatientBookingPage() {
   const getTwoDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 2);
-
     return d.toISOString().split("T")[0];
   };
+
   useEffect(() => {
     if (date) {
       localStorage.setItem("patient_selected_date", date);
     }
   }, [date]);
+
   // =========================
   // FETCH SLOTS
   // =========================
   useEffect(() => {
     if (!doctorId || !date) return;
 
+    setSlots({});
+    setSlotOwners({});
+    setSlotIds({});
     const fetchSlots = async () => {
       try {
         setLoading(true);
@@ -1005,7 +1447,18 @@ export default function PatientBookingPage() {
         const idMap: Record<string, string> = {};
 
         for (const s of data) {
-          mapped[s.slot_code] = s.slot_status;
+          // 🔥 normalize status
+          let status: SlotStatus;
+
+          if (s.slot_status === "AVAILABLE") {
+            status = "AVAILABLE";
+          } else if (s.slot_status === "BOOKED") {
+            status = "BOOKED";
+          } else {
+            status = "NOT_AVAILABLE";
+          }
+
+          mapped[s.slot_code] = status;
 
           if (s.slot_id) {
             idMap[s.slot_code] = s.slot_id;
@@ -1045,10 +1498,10 @@ export default function PatientBookingPage() {
   const isInvalidDate = date ? isPastOrToday(date) : true;
 
   // =========================
-  // BOOK SLOT
+  // BOOK SLOT (FIXED)
   // =========================
   const handleBook = async (slot: string) => {
-    if (!doctorId || !patientId || !date) return;
+    if (!doctorId || !insurance || !date) return;
 
     if (isInvalidDate) {
       alert("Invalid date");
@@ -1080,12 +1533,18 @@ export default function PatientBookingPage() {
       }
 
       const result = await res.json();
+      if (!result.success) {
+        alert(result.message);
+        return;
+      }
 
       alert(`Booked successfully!\nTransaction: ${result.booking_ref}`);
 
-      // update UI ngay lập tức
       setSlots((prev) => ({ ...prev, [slot]: "BOOKED" }));
-      setSlotOwners((prev) => ({ ...prev, [slot]: patientId! }));
+      setSlotOwners((prev) => ({
+        ...prev,
+        [slot]: String(patientId),
+      }));
     } catch (err) {
       console.error(err);
       alert("Server error");
@@ -1093,10 +1552,10 @@ export default function PatientBookingPage() {
   };
 
   // =========================
-  // CANCEL SLOT
+  // CANCEL SLOT (FIXED)
   // =========================
   const handleCancel = async (slot: string) => {
-    if (!doctorId || !patientId || !date) return;
+    if (!doctorId || !insurance || !date) return;
 
     const slotId = slotIds[slot];
 
@@ -1113,7 +1572,7 @@ export default function PatientBookingPage() {
         },
         body: JSON.stringify({
           slot_id: slotId,
-          patient_id: Number(patientId),
+          insurance_number: insurance,
         }),
       });
 
@@ -1126,9 +1585,9 @@ export default function PatientBookingPage() {
 
       setSlots((prev) => ({ ...prev, [slot]: "AVAILABLE" }));
       setSlotOwners((prev) => {
-        const copy = { ...prev };
-        delete copy[slot];
-        return copy;
+        const newOwners = { ...prev };
+        delete newOwners[slot];
+        return newOwners;
       });
     } catch (err) {
       console.error(err);
@@ -1142,10 +1601,13 @@ export default function PatientBookingPage() {
   // UI
   // =========================
   return (
-    
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <h1 className="text-xl font-semibold">Booking Doctor ID: {doctorId}</h1>
 
+      {/* 🔥 THÊM NGAY TẠI ĐÂY */}
+      <div className="text-sm text-gray-500">Insurance: {insurance}</div>
+
+      <div style={{ display: "none" }}>Patient ID: {patientId}</div>
       <input
         type="date"
         className="border p-2 rounded"
@@ -1171,40 +1633,44 @@ export default function PatientBookingPage() {
           }
 
           if (status === "BOOKED") {
-            const isMine = slotOwners[slot] === patientId;
+            const isMySlot = slotOwners[slot] === patientId;
 
-            if (isMine) {
-              return (
-                <div key={slot} className="border p-3 bg-pink-50 rounded">
-                  <div>{slot}</div>
-                  <div>{time}</div>
-                  <div className="text-pink-600 font-bold">YOUR BOOKING</div>
+            return (
+              <div
+                key={slot}
+                className={`border p-3 rounded ${
+                  isMySlot ? "bg-pink-100" : "bg-yellow-50"
+                }`}
+              >
+                <div>{slot}</div>
+                <div>{time}</div>
 
+                <div
+                  className={`font-bold ${
+                    isMySlot ? "text-pink-600" : "text-red-500"
+                  }`}
+                >
+                  BOOKED
+                </div>
+
+                {isMySlot && (
                   <button
                     onClick={() => handleCancel(slot)}
-                    className="mt-2 bg-pink-500 text-white px-2 py-1 rounded"
+                    className="mt-2 bg-red-500 text-white px-2 py-1 rounded"
                   >
                     Cancel
                   </button>
-                </div>
-              );
-            }
-
-            return (
-              <div key={slot} className="border p-3 bg-yellow-50 rounded">
-                <div>{slot}</div>
-                <div>{time}</div>
-                <div className="text-red-500 font-bold">BOOKED</div>
+                )}
               </div>
             );
           }
 
-          if (status === "BLOCKED") {
+          if (status === "NOT_AVAILABLE") {
             return (
               <div key={slot} className="border p-3 bg-gray-200 rounded">
                 <div>{slot}</div>
                 <div>{time}</div>
-                <div className="text-gray-500">BLOCKED</div>
+                <div className="text-red-500">NOT AVAILABLE</div>
               </div>
             );
           }
@@ -1245,31 +1711,81 @@ type Appointment = {
 
 export default function PatientHistoryPage() {
   const [data, setData] = useState<Appointment[]>([]);
-  const [patientId, setPatientId] = useState<string | null>(null);
+  const [filteredData, setFilteredData] = useState<Appointment[]>([]);
+  const [patientId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("user_id");
+    }
+    return null;
+  });
+
+  // filter
+  const [selectedDate, setSelectedDate] = useState("");
+
+  // pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
   const router = useRouter();
 
-  useEffect(() => {
-    const id = localStorage.getItem("user_id");
-    setPatientId(id);
-  }, []);
-
+  // 📡 fetch data
   useEffect(() => {
     if (!patientId) return;
 
     const fetchData = async () => {
       const res = await fetch(
-        `http://127.0.0.1:8000/appointments/appointments/patient/${patientId}`
+        `http://127.0.0.1:8000/appointments/appointments/patient/${patientId}`,
       );
 
+      if (!res.ok) {
+        console.error("API error:", res.status);
+        return;
+      }
+
       const d = await res.json();
-      setData(d);
+
+      if (Array.isArray(d)) {
+        setData(d);
+        setFilteredData(d); // init
+      }
     };
 
     fetchData();
   }, [patientId]);
 
+  // 🔍 filter by date
+  const handleFilter = () => {
+    if (!selectedDate) {
+      setFilteredData(data);
+      setCurrentPage(1);
+      return;
+    }
+
+    const filtered = data.filter(
+      (item) => item.slot_date === selectedDate,
+      // nếu backend trả datetime → dùng:
+      // item.slot_date.slice(0, 10) === selectedDate
+    );
+
+    setFilteredData(filtered);
+    setCurrentPage(1);
+  };
+
+  // 🔄 reset filter
+  const handleReset = () => {
+    setSelectedDate("");
+    setFilteredData(data);
+    setCurrentPage(1);
+  };
+
+  // 📄 pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const currentData = filteredData.slice(startIndex, startIndex + itemsPerPage);
+
+  // 🔥 navigation
   const handleClick = (appt: Appointment) => {
-    // 👉 redirect sang booking page + set date
     localStorage.setItem("patient_selected_date", appt.slot_date);
     localStorage.setItem("selected_doctor_id", appt.doctor_id);
 
@@ -1280,20 +1796,78 @@ export default function PatientHistoryPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-4">
       <h1 className="text-xl font-semibold">My Appointments</h1>
 
-      {data.map((appt, idx) => (
-        <div
-          key={idx}
-          className="border p-3 rounded bg-blue-50 cursor-pointer hover:bg-blue-100"
-          onClick={() => handleClick(appt)}
+      {/* 🔍 FILTER */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="date"
+          className="border p-2"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+        />
+
+        <button
+          onClick={handleFilter}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
         >
-          <div><b>Date:</b> {appt.slot_date}</div>
-          <div><b>Slot:</b> {appt.slot_code}</div>
-          <div><b>Doctor:</b> {appt.doctor_id}</div>
+          Confirm
+        </button>
+
+        <button onClick={handleReset} className="bg-gray-300 px-4 py-2 rounded">
+          Reset
+        </button>
+      </div>
+
+      {/* 📋 LIST */}
+      {currentData.length === 0 ? (
+        <div className="text-gray-500">No data</div>
+      ) : (
+        currentData.map((appt, idx) => (
+          <div
+            key={idx}
+            className="border p-3 rounded bg-blue-50 cursor-pointer hover:bg-blue-100 transition"
+            onClick={() => handleClick(appt)}
+          >
+            <div>
+              <b>Date:</b> {appt.slot_date}
+            </div>
+            <div>
+              <b>Slot:</b> {appt.slot_code}
+            </div>
+            <div>
+              <b>Doctor:</b> {appt.doctor_id}
+            </div>
+          </div>
+        ))
+      )}
+
+      {/* 📄 PAGINATION */}
+      {totalPages > 1 && (
+        <div className="flex gap-2 mt-4 items-center">
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((p) => p - 1)}
+            className="px-3 py-1 border disabled:opacity-50"
+          >
+            Prev
+          </button>
+
+          <span>
+            Page {currentPage} / {totalPages}
+          </span>
+
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => p + 1)}
+            className="px-3 py-1 border disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
-      ))}
+      )}
     </div>
   );
-}.
+}
+.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\healthcare-fe\components\Button.tsx =====
 "use client";
 

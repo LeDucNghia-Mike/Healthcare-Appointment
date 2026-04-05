@@ -146,18 +146,18 @@ export default function SlotPage() {
         {Object.entries(SLOT_MAP).map(([slot, time]) => {
           const status = slots[slot];
 
-          // ❌ NOT AVAILABLE
+          // ❌ NOT AVAILABLE → PINK
           if (!status) {
             return (
-              <div key={slot} className="border p-3 bg-gray-100">
+              <div key={slot} className="border p-3 bg-pink-100">
                 <div>{slot}</div>
                 <div>{time}</div>
-                <div className="text-red-500">NOT AVAILABLE</div>
+                <div className="text-red-500 font-semibold">NOT AVAILABLE</div>
               </div>
             );
           }
 
-          // 🔥 BOOKED
+          // 🔥 BOOKED → YELLOW
           if (status === "BOOKED") {
             return (
               <div key={slot} className="border p-3 bg-yellow-50 space-y-2">
@@ -165,19 +165,12 @@ export default function SlotPage() {
                 <div>{time}</div>
                 <div className="text-red-500 font-bold">BOOKED</div>
 
-                {/* <button
-                  onClick={() => handleViewPatient(slot)}
-                  className="text-blue-600 underline"
-                >
-                  View Patient
-                </button> */}
-
                 {patientMap[slot] && <div>Patient: {patientMap[slot]}</div>}
               </div>
             );
           }
 
-          // ⛔ PAST
+          // ⛔ PAST → GRAY LOCKED
           if (isPastOrToday(date)) {
             return (
               <div key={slot} className="border p-3 bg-gray-100">
@@ -189,14 +182,20 @@ export default function SlotPage() {
             );
           }
 
-          // ✅ NORMAL
+          // 🎨 STATUS COLOR LOGIC
+          let bgColor = "";
+          if (status === "AVAILABLE") bgColor = "bg-green-100";
+          if (status === "BLOCKED") bgColor = "bg-gray-200";
+
+          // ✅ NORMAL (EDITABLE)
           return (
-            <div key={slot} className="border p-3">
+            <div key={slot} className={`border p-3 ${bgColor}`}>
               <div>{slot}</div>
               <div>{time}</div>
-              <div>{status}</div>
+              <div className="font-medium">{status}</div>
 
               <select
+                className="border p-1 rounded"
                 value={status}
                 onChange={(e) =>
                   handleUpdate(slot, e.target.value as SlotStatus)

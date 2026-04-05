@@ -63,6 +63,45 @@ def get_doctor_slots(doctor_id: str, slot_date: str):
 
     return result
 
+def generate_slot_preview(doctor_id: str, year: int, month: int):
+    # ==============================
+    # FIX MONTH ROLLOVER
+    # ==============================
+    if month == 1:
+        prev_month = 12
+        prev_year = year - 1
+    else:
+        prev_month = month - 1
+        prev_year = year
+
+    prev_month_start = f"{prev_year}-{prev_month:02d}-01"
+    curr_month_start = f"{year}-{month:02d}-01"
+
+    query = """
+    SELECT
+        EXTRACT(ISODOW FROM slot_date) AS dow,
+        slot_code,
+        COUNT(*) AS cnt
+    FROM doctor_slot
+    WHERE doctor_id = %s
+      AND slot_status = 'AVAILABLE'
+      AND slot_date >= %s::date
+      AND slot_date < (%s::date)
+      AND EXTRACT(ISODOW FROM slot_date) BETWEEN 1 AND 6
+    GROUP BY dow, slot_code
+    """
+
+    rows = fetch_all(query, (doctor_id, prev_month_start, curr_month_start))
+
+    result = {}
+
+    for r in rows:
+        # 🔥 FIX KEY FORMAT (match frontend)
+        key = f"{int(r['dow'])}_{r['slot_code']}"
+
+        result[key] = "GREEN" if r["cnt"] >= 2 else "RED"
+
+    return result
 
 # ==============================
 # GET PATIENT FROM SLOT
@@ -102,7 +141,6 @@ def get_slot_id(doctor_id: str, slot_date: str, slot_code: str):
 def upsert_doctor_slot(doctor_id: str, slot_date: str, slot_code: str, status: str):
     slot_date_obj = datetime.strptime(slot_date, "%Y-%m-%d").date()
 
-    # check tồn tại
     existing = fetch_one(
         """
         SELECT slot_id
@@ -115,20 +153,30 @@ def upsert_doctor_slot(doctor_id: str, slot_date: str, slot_code: str, status: s
     )
 
     if existing:
-        # UPDATE
+        slot_id = existing["slot_id"]
+
+        # 🔥 CHECK nếu slot đang BOOKED
+        booked = fetch_one("""
+            SELECT 1
+            FROM appointment
+            WHERE slot_id = %s
+        """, (slot_id,))
+
+        if booked and status != "BOOKED":
+            raise Exception("Cannot change status of a booked slot")
+
         execute_query(
             """
             UPDATE doctor_slot
             SET slot_status = %s
             WHERE slot_id = %s;
         """,
-            (status, existing["slot_id"]),
+            (status, slot_id),
         )
 
-        return {"message": "Slot updated", "slot_id": existing["slot_id"]}
+        return {"message": "Slot updated", "slot_id": slot_id}
 
     else:
-        # CREATE slot_id dạng deterministic
         slot_id = f"{slot_date.replace('-', '')}{doctor_id}{slot_code}"
 
         execute_query(
@@ -146,7 +194,6 @@ def upsert_doctor_slot(doctor_id: str, slot_date: str, slot_code: str, status: s
         )
 
         return {"message": "Slot created", "slot_id": slot_id}
-
 
 # ==============================
 # DELETE

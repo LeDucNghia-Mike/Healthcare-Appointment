@@ -1,1 +1,1 @@
-select * from appointment;
+select * from doctor_slot where doctor_id = 'DR001';

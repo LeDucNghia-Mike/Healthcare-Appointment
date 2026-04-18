@@ -1,25 +1,23 @@
+
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 
 export default function PatientMedicalRecordPage() {
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   const router = useRouter();
 
   useEffect(() => {
-    // 1. Lấy insurance từ localStorage (không hardcode nữa)
     const insurance = localStorage.getItem("user_insurance");
 
-    // 2. Kiểm tra nếu không có mã bảo hiểm thì redirect về login hoặc báo lỗi
     if (!insurance) {
       console.error("No insurance found in storage");
       setLoading(false);
-      // router.push("/auth/login"); // Có thể redirect nếu cần
       return;
     }
 
-    // 3. Gọi API với mã bảo hiểm động
     fetch(`http://127.0.0.1:8000/records/patient-insurance/${insurance}`)
       .then((res) => res.json())
       .then((resData) => {
@@ -30,21 +28,48 @@ export default function PatientMedicalRecordPage() {
         console.error("Fetch error:", err);
         setLoading(false);
       });
-  }, [router]);
+  }, []);
 
-  if (loading) return <div className="p-10 text-center font-mono">LOADING_RECORDS...</div>;
+  // 🔍 Filter records theo doctor_name + doctor_id
+  const filteredRecords = useMemo(() => {
+    const keyword = searchTerm.toLowerCase();
+
+    return records.filter((rec) => {
+      return (
+        rec.doctor_name?.toLowerCase().includes(keyword) ||
+        rec.doctor_id?.toLowerCase().includes(keyword)
+      );
+    });
+  }, [records, searchTerm]);
+
+  if (loading) {
+    return (
+      <div className="p-10 text-center font-mono">
+        LOADING_RECORDS...
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-xl font-bold mb-6 border-l-4 border-blue-600 pl-3 uppercase">
-        Lịch sử khám bệnh
+        Medical history
       </h1>
 
+      {/* 🔍 Search box */}
+      <input
+        type="text"
+        placeholder="Search doctor name or ID..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full mb-4 p-2 border-2 border-black font-mono"
+      />
+
       <div className="grid gap-4">
-        {records.length > 0 ? (
-          records.map((rec) => (
+        {filteredRecords.length > 0 ? (
+          filteredRecords.map((rec) => (
             <div
-              key={rec.slot_id}
+              key={`${rec.slot_id}-${rec.version_number}`} // ✅ fix duplicate key
               onClick={() =>
                 router.push(`/dashboard/patient/medical-record/${rec.slot_id}`)
               }
@@ -61,6 +86,7 @@ export default function PatientMedicalRecordPage() {
                   ID: {rec.doctor_id}
                 </p>
               </div>
+
               <div className="text-right">
                 <p className="font-black text-gray-700">{rec.date}</p>
                 <span className="text-[10px] bg-black text-white px-2 py-1 font-mono uppercase">
@@ -71,10 +97,13 @@ export default function PatientMedicalRecordPage() {
           ))
         ) : (
           <div className="p-10 border-2 border-dashed border-gray-300 text-center text-gray-400">
-            Chưa có dữ liệu hồ sơ cho mã bảo hiểm này.
+            {searchTerm
+              ? "Không tìm thấy kết quả phù hợp."
+              : "Chưa có dữ liệu hồ sơ cho mã bảo hiểm này."}
           </div>
         )}
       </div>
     </div>
   );
 }
+

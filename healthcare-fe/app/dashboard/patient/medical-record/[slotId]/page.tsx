@@ -17,7 +17,7 @@ export default function PatientRecordDetail() {
     <div className="max-w-3xl mx-auto p-4">
       <button onClick={() => router.back()} className="text-blue-600 mb-6 font-medium">← Quay lại danh sách</button>
       
-      <h2 className="text-2xl font-bold mb-2">Chi tiết hồ sơ</h2>
+      <h2 className="text-2xl font-bold mb-2">Profile details</h2>
       <p className="text-gray-500 mb-8 font-mono">SLOT_ID: {slotId}</p>
 
       <div className="space-y-6">

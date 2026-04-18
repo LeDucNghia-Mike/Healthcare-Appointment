@@ -1,1 +1,1 @@
-select count(*) from doctor_slot WHERE slot_status = 'BOOKED';
+select slot_id from medical_record where patient_id = 1283;

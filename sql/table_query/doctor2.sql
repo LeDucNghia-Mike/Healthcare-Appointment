@@ -1,1 +1,1 @@
-select * from doctor where doctor_id = 'DR001';    
+select * from doctor_insert_month where doctor_id = 'DR001';

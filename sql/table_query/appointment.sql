@@ -1,1 +1,1 @@
-select  last_value from appointment_seq;
+select * from doctor_slot where doctor_id = 'DR001';

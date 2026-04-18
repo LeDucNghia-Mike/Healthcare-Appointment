@@ -61,7 +61,22 @@ from pathlib import Path
 from app.db import get_admin_connection, get_app_connection
 from app.config import PG_APP_DB
 
+def init_database():
+    sql = Path("sql/init_db.sql").read_text()
 
+    conn = get_admin_connection()
+    conn.autocommit = True
+
+    try:
+        with conn.cursor() as cur:
+            for statement in sql.split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    cur.execute(stmt)
+            print("Drop and Create DB Healthcare done")
+    finally:
+        conn.close()
+        
 def create_database():
     # explanation: Tạo application database nếu chưa tồn tại.
     conn = get_admin_connection()
@@ -96,8 +111,9 @@ def create_schema():
 
 
 if __name__ == "__main__":
-    create_database()
+    # create_database()
     create_schema()
+    init_database()
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\db.py =====
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -1288,6 +1304,7 @@ def delete(id: int):
 from fastapi import APIRouter, HTTPException
 from app.services.patient_service import get_patient_by_id
 from app.services.doctor_service import get_doctor_by_id  # assuming you have this
+from app.services.admin_service import get_admin_by_code
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -1329,7 +1346,40 @@ def login_doctor(data: dict):
         "message": "Login successful",
         "role": "doctor",
         "user": doctor
+    }
+
+@router.post("/login/admin")
+def login_admin(data: dict):
+    admin_code = data.get("admin_code")
+
+    if not admin_code:
+        raise HTTPException(status_code=400, detail="admin_code is required")
+
+    admin = get_admin_by_code(admin_code)
+
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    return {
+        "message": "Login successful",
+        "role": "admin",
+        "user": admin
     }.
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\calendar_route.py =====
+from fastapi import APIRouter
+from app.services.calendar_service import *
+
+router = APIRouter(prefix="/calendar", tags=["Calendar"])
+
+@router.get("/")
+def get_calendar(start: str, end: str):
+    return get_calendar_range(start, end)
+
+
+@router.put("/update")
+def update_calendar(data: dict):
+    update_calendar_status(data["date"], data["status"])
+    return {"message": "Updated"}.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\routes\doctor_route.py =====
 from fastapi import APIRouter, HTTPException
 from app.services.doctor_service import *
@@ -1760,7 +1810,8 @@ def seed_doctor_slots():
         row["doctorID"],
         row["date"],
         row["slotCode"],
-        "AVAILABLE"
+        "AVAILABLE",
+        "AVAILABLE"  # admin_status mặc định là 'AVAILABLE'
     )
     for _, row in df.iterrows()
     ]
@@ -1776,7 +1827,8 @@ def seed_doctor_slots():
                     doctor_id,
                     slot_date,
                     slot_code,
-                    slot_status
+                    slot_status,
+                    admin_status
                 )
                 VALUES %s
                 ON CONFLICT DO NOTHING;
@@ -1909,7 +1961,7 @@ def seed_appointment_transaction():
 
     rows = [
         (
-            clean(row["slotid"]),
+            clean(row["slotID"]),
             clean(row["patientID"]),
             clean(row["status"]).upper(),
             clean(row["event_timestamp"])
@@ -1985,30 +2037,47 @@ def seed_appointment_transaction():
 
     finally:
         conn.close().
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\admin_service.py =====
+# app/services/admin_service.py
+
+from app.db import fetch_one
+
+def get_admin_by_code(admin_code: str):
+    return fetch_one(
+        "SELECT * FROM admin WHERE admin_code = %s",
+        (admin_code,)
+    ).
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\appointment_service.py =====
 from app.db import fetch_all, fetch_one, execute_query, get_app_connection
 from datetime import datetime
+
 
 # ==============================
 # GET ALL
 # ==============================
 def get_all_appointments():
-    return fetch_all("""
+    return fetch_all(
+        """
         SELECT *
         FROM appointment
         ORDER BY appointment_id;
-    """)
+    """
+    )
 
 
 # ==============================
 # GET BY ID
 # ==============================
 def get_appointment_by_id(appointment_id: int):
-    return fetch_one("""
+    return fetch_one(
+        """
         SELECT *
         FROM appointment
         WHERE appointment_id = %s;
-    """, (appointment_id,))
+    """,
+        (appointment_id,),
+    )
+
 
 def get_patient_appointments(patient_id: int):
     query = """
@@ -2026,6 +2095,7 @@ def get_patient_appointments(patient_id: int):
     """
 
     return fetch_all(query, (patient_id,))
+
 
 # ==============================
 # CREATE (BOOK SLOT)
@@ -2048,19 +2118,25 @@ def create_appointment(data: dict):
             # =========================
             # 1. LOCK SLOT + CHECK STATUS
             # =========================
-            cur.execute("""
-                SELECT slot_status
+            cur.execute(
+                """
+                SELECT slot_status, admin_status
                 FROM doctor_slot
                 WHERE slot_id = %s
                 FOR UPDATE;
-            """, (slot_id,))
+            """,
+                (slot_id,),
+            )
 
             row = cur.fetchone()
 
             if not row:
                 raise Exception("Slot not found")
 
-            slot_status = row[0]
+            slot_status, admin_status = row
+
+            if admin_status == "BLOCKED":
+                raise Exception("Slot blocked by admin")
 
             if slot_status == "BLOCKED":
                 raise Exception("That slot is blocked")
@@ -2071,7 +2147,8 @@ def create_appointment(data: dict):
             # =========================
             # 2. INSERT TRANSACTION
             # =========================
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO appointment_transaction (
                     slot_id,
                     patient_id,
@@ -2080,14 +2157,17 @@ def create_appointment(data: dict):
                 )
                 VALUES (%s, %s, 'BOOKED', NOW())
                 RETURNING transaction_id;
-            """, (slot_id, patient_id))
+            """,
+                (slot_id, patient_id),
+            )
 
             txn_id = cur.fetchone()[0]
 
             # =========================
             # 3. INSERT APPOINTMENT
             # =========================
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO appointment (
                     booking_ref,
                     slot_id,
@@ -2096,18 +2176,23 @@ def create_appointment(data: dict):
                 )
                 VALUES (%s, %s, %s, NOW())
                 RETURNING appointment_id;
-            """, (txn_id, slot_id, patient_id))
+            """,
+                (txn_id, slot_id, patient_id),
+            )
 
             appointment_id = cur.fetchone()[0]
 
             # =========================
             # 4. UPDATE SLOT STATUS
             # =========================
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE doctor_slot
                 SET slot_status = 'BOOKED'
                 WHERE slot_id = %s;
-            """, (slot_id,))
+            """,
+                (slot_id,),
+            )
 
         conn.commit()
 
@@ -2115,7 +2200,7 @@ def create_appointment(data: dict):
             "success": True,
             "appointment_id": appointment_id,
             "booking_ref": txn_id,
-            "message": "Booked successfully"
+            "message": "Booked successfully",
         }
 
     except Exception as e:
@@ -2124,22 +2209,23 @@ def create_appointment(data: dict):
         # =========================
         # RETURN CLEAN ERROR
         # =========================
-        return {
-            "success": False,
-            "message": str(e)
-        }
+        return {"success": False, "message": str(e)}
 
     finally:
         conn.close()
-        
+
+
 # ==============================
 # DELETE (ADMIN ONLY)
 # ==============================
 def delete_appointment(appointment_id: int):
-    execute_query("""
+    execute_query(
+        """
         DELETE FROM appointment
         WHERE appointment_id = %s;
-    """, (appointment_id,))
+    """,
+        (appointment_id,),
+    )
 
 
 # ==============================
@@ -2152,14 +2238,17 @@ def cancel_appointment(slot_id: str, insurance_number: str):
         with conn.cursor() as cur:
 
             # 1. CHECK OWNERSHIP (insurance → patient → appointment)
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT a.appointment_id, a.patient_id
                 FROM appointment a
                 JOIN patient p 
                     ON a.patient_id = p.patient_id
                 WHERE a.slot_id = %s
                 AND p.insurance_number = %s;
-            """, (slot_id, insurance_number))
+            """,
+                (slot_id, insurance_number),
+            )
 
             appt = cur.fetchone()
 
@@ -2170,7 +2259,8 @@ def cancel_appointment(slot_id: str, insurance_number: str):
             patient_id = appt[1]
 
             # 2. LOG TRANSACTION
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO appointment_transaction (
                     slot_id,
                     patient_id,
@@ -2179,29 +2269,34 @@ def cancel_appointment(slot_id: str, insurance_number: str):
                 )
                 VALUES (%s, %s, 'CANCELLED', NOW())
                 RETURNING transaction_id;
-            """, (slot_id, patient_id))
+            """,
+                (slot_id, patient_id),
+            )
 
             cancel_txn = cur.fetchone()[0]
 
             # 3. DELETE APPOINTMENT
-            cur.execute("""
+            cur.execute(
+                """
                 DELETE FROM appointment
                 WHERE appointment_id = %s;
-            """, (appointment_id,))
+            """,
+                (appointment_id,),
+            )
 
             # 4. UPDATE SLOT
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE doctor_slot
                 SET slot_status = 'AVAILABLE'
                 WHERE slot_id = %s;
-            """, (slot_id,))
+            """,
+                (slot_id,),
+            )
 
         conn.commit()
 
-        return {
-            "message": "Cancelled",
-            "cancel_transaction": cancel_txn
-        }
+        return {"message": "Cancelled", "cancel_transaction": cancel_txn}
 
     except Exception as e:
         conn.rollback()
@@ -2209,7 +2304,8 @@ def cancel_appointment(slot_id: str, insurance_number: str):
 
     finally:
         conn.close()
-        
+
+
 def get_doctor_appointments(doctor_id: str):
     query = """
         SELECT 
@@ -2226,6 +2322,106 @@ def get_doctor_appointments(doctor_id: str):
 
     return fetch_all(query, (doctor_id,))
 .
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\calendar_service.py =====
+# app/services/calendar_service.py
+
+from app.db import execute_query, fetch_all
+
+def get_calendar_range(start_date, end_date):
+    return fetch_all("""
+        SELECT * FROM calendar_day
+        WHERE date BETWEEN %s AND %s
+        ORDER BY date
+    """, (start_date, end_date))
+
+
+
+from app.db import get_app_connection
+
+def update_calendar_status(date, status):
+    conn = get_app_connection()
+
+    try:
+        with conn.cursor() as cur:
+
+            # =========================
+            # 1. UPDATE CALENDAR DAY
+            # =========================
+            cur.execute("""
+                UPDATE calendar_day
+                SET status = %s
+                WHERE date = %s
+            """, (status, date))
+
+            if status == "HOLIDAY":
+
+                # =========================
+                # 2. CANCEL TRANSACTIONS
+                # =========================
+                cur.execute("""
+                    UPDATE appointment_transaction
+                    SET action = 'CANCELLED'
+                    WHERE slot_id IN (
+                        SELECT slot_id
+                        FROM doctor_slot
+                        WHERE slot_date = %s
+                    )
+                """, (date,))
+
+                # =========================
+                # 3. DELETE APPOINTMENTS
+                # =========================
+                cur.execute("""
+                    DELETE FROM appointment
+                    WHERE slot_id IN (
+                        SELECT slot_id
+                        FROM doctor_slot
+                        WHERE slot_date = %s
+                    )
+                """, (date,))
+
+                # =========================
+                # 4. BLOCK SLOT + RESET STATUS
+                # =========================
+                cur.execute("""
+                    UPDATE doctor_slot
+                    SET 
+                        admin_status = 'BLOCKED',
+                        slot_status = 'AVAILABLE'
+                    WHERE slot_date = %s
+                """, (date,))
+
+            else:
+                # =========================
+                # 5. UNBLOCK SLOT
+                # =========================
+                cur.execute("""
+                    UPDATE doctor_slot
+                    SET admin_status = 'AVAILABLE'
+                    WHERE slot_date = %s
+                """, (date,))
+
+        # =========================
+        # COMMIT
+        # =========================
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"Calendar updated to {status}"
+        }
+
+    except Exception as e:
+        conn.rollback()
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+    finally:
+        conn.close()
+
+        .
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\app\services\doctor_service.py =====
 from app.db import fetch_all, fetch_one, execute_query
 
@@ -2345,6 +2541,7 @@ def get_doctor_slots(doctor_id: str, slot_date: str):
         ds.slot_id,
         ds.slot_code,
         CASE 
+            WHEN ds.admin_status = 'BLOCKED' THEN 'BLOCKED'
             WHEN a.patient_id IS NOT NULL THEN 'BOOKED'
             ELSE ds.slot_status
         END AS slot_status,
@@ -2428,6 +2625,7 @@ def get_patient_by_slot(doctor_id: str, slot_date: str, slot_code: str):
         AND ds.slot_date = %s
         AND ds.slot_code = %s
         AND ds.slot_status = 'BOOKED'
+        AND ds.admin_status = 'AVAILABLE'
     """
 
     return fetch_one(query, (doctor_id, slot_date, slot_code))
@@ -2796,13 +2994,23 @@ def confirm_generate(doctor_id: str, year: int, month: int, slots: list):
 
     insert_rows = []
 
+    holidays = fetch_all("""
+        SELECT date
+        FROM calendar_day
+        WHERE date >= %s
+        AND date < %s
+        AND status = 'HOLIDAY'
+    """, (start_date, end_date))
+
+    holiday_set = set(h["date"] for h in holidays)
+
     for i in range(delta.days):
         current_date = start_date + timedelta(days=i)
 
-        dow = current_date.isoweekday()  # 1-7
+        dow = current_date.isoweekday()
 
-        # ❌ skip Sunday
-        if dow == 7:
+        # 🔥 SKIP HOLIDAY
+        if current_date in holiday_set:
             continue
 
         for s in slots:
@@ -2811,7 +3019,6 @@ def confirm_generate(doctor_id: str, year: int, month: int, slots: list):
 
             slot_code = s["slot_code"]
 
-            # 🔥 SLOT_ID FORMAT
             slot_id = f"{current_date.strftime('%Y%m%d')}{doctor_id}{slot_code}"
 
             insert_rows.append((
@@ -2821,7 +3028,6 @@ def confirm_generate(doctor_id: str, year: int, month: int, slots: list):
                 slot_code,
                 "AVAILABLE"
             ))
-
     # ==============================
     # INSERT BATCH
     # ==============================

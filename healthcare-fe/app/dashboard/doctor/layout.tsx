@@ -37,7 +37,6 @@ export default function DoctorLayout({
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-
         <button
           onClick={() => router.push("/dashboard/doctor/slots")}
           className={`px-4 py-1 rounded ${
@@ -59,10 +58,22 @@ export default function DoctorLayout({
         <button
           onClick={() => router.push("/dashboard/doctor/generate")}
           className={`px-4 py-1 rounded ${
-            pathname.includes("generate") ? "bg-black text-white" : "bg-gray-200"
+            pathname.includes("generate")
+              ? "bg-black text-white"
+              : "bg-gray-200"
           }`}
         >
           Generate Schedule
+        </button>
+        <button
+          onClick={() => router.push("/dashboard/doctor/medical-record")}
+          className={`px-4 py-1 rounded ${
+            pathname.includes("medical-record")
+              ? "bg-black text-white"
+              : "bg-gray-200"
+          }`}
+        >
+          Medical Records
         </button>
       </div>
 

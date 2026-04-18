@@ -1,1 +1,1 @@
-select * from patient where patient_id >= 12900;
+select * from patient where patient_id >= 1283;

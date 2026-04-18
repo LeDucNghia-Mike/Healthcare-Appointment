@@ -1,1 +1,1 @@
-select * from doctor_slot where doctor_id = 'DR001';
+select * from doctor_slot where doctor_id = 'DR001' and slot_date >= '2026-06-01' AND slot_date <= '2026-06-30';

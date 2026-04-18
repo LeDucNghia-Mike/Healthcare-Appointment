@@ -24,43 +24,48 @@ ALL_SLOTS = [
 
 
 # ==============================
-# GET SLOTS FOR UI
+# GET SLOTS FOR UI (Đã sửa)
 # ==============================
 def get_doctor_slots(doctor_id: str, slot_date: str):
     query = """
     SELECT 
-        ds.slot_id,
-        ds.slot_code,
-        CASE 
-            WHEN a.patient_id IS NOT NULL THEN 'BOOKED'
-            ELSE ds.slot_status
-        END AS slot_status,
+        ds.slot_id, 
+        ds.slot_code, 
+        ds.slot_status, 
+        ds.admin_status, 
         a.patient_id
     FROM doctor_slot ds
-    LEFT JOIN appointment a 
-        ON ds.slot_id = a.slot_id
-    WHERE ds.doctor_id = %s
-    AND ds.slot_date = %s;
-"""
-
+    LEFT JOIN appointment a ON ds.slot_id = a.slot_id
+    WHERE ds.doctor_id = %s AND ds.slot_date = %s;
+    """
     rows = fetch_all(query, (doctor_id, slot_date))
-
     db_slots = {row["slot_code"]: row for row in rows}
 
     result = []
-
     for slot in ALL_SLOTS:
         row = db_slots.get(slot)
+        
+        # Logic tính toán status cuối cùng để gửi về Frontend
+        final_status = "NOT_AVAILABLE"
+        
+        if row:
+            if row["patient_id"]:
+                final_status = "BOOKED"
+            elif row["admin_status"] == "BLOCKED":
+                final_status = "BLOCKED"
+            elif row["slot_status"] == "AVAILABLE":
+                # Chỉ AVAILABLE khi bác sĩ chọn AVAILABLE VÀ admin không BLOCK
+                final_status = "AVAILABLE"
+            else:
+                final_status = "NOT_AVAILABLE"
 
-        result.append(
-            {
-                "slot_id": row["slot_id"] if row else None,
-                "slot_code": slot,
-                "slot_status": row["slot_status"] if row else None,
-                "patient_id": row["patient_id"] if row else None,
-            }
-        )
-
+        result.append({
+            "slot_id": row["slot_id"] if row else None,
+            "slot_code": slot,
+            "slot_status": final_status,
+            "admin_status": row["admin_status"] if row else "AVAILABLE",
+            "patient_id": row["patient_id"] if row else None,
+        })
     return result
 
 def generate_slot_preview(doctor_id: str, year: int, month: int):
@@ -115,6 +120,7 @@ def get_patient_by_slot(doctor_id: str, slot_date: str, slot_code: str):
         AND ds.slot_date = %s
         AND ds.slot_code = %s
         AND ds.slot_status = 'BOOKED'
+        AND ds.admin_status = 'AVAILABLE'
     """
 
     return fetch_one(query, (doctor_id, slot_date, slot_code))
@@ -140,6 +146,11 @@ def get_slot_id(doctor_id: str, slot_date: str, slot_code: str):
 # ==============================
 def upsert_doctor_slot(doctor_id: str, slot_date: str, slot_code: str, status: str):
     slot_date_obj = datetime.strptime(slot_date, "%Y-%m-%d").date()
+
+    # 🔥 CHẶN update/insert nếu Admin đã khóa ngày (HOLIDAY)
+    day_info = fetch_one("SELECT status FROM calendar_day WHERE date = %s", (slot_date_obj,))
+    if day_info and day_info["status"] == "HOLIDAY":
+        raise Exception("Cannot modify slots. This date is blocked by Admin.")
 
     existing = fetch_one(
         """

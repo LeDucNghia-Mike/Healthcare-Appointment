@@ -25,6 +25,12 @@ END IF;
 IF NOT EXISTS (
     SELECT 1
     FROM pg_type
+    WHERE typname = 'admin_status_enum'
+) THEN CREATE TYPE admin_status_enum AS ENUM ('AVAILABLE', 'BLOCKED');
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
     WHERE typname = 'patient_status_enum'
 ) THEN CREATE TYPE patient_status_enum AS ENUM ('ACTIVE', 'INACTIVE');
 END IF;
@@ -37,7 +43,7 @@ END IF;
 IF NOT EXISTS (
     SELECT 1
     FROM pg_type
-    WHERE typname = 'slot_type_enum'
+    WHERE typname = 'slot_type_enum'    
 ) THEN CREATE TYPE slot_type_enum AS ENUM ('CONSULTATION', 'FOLLOW_UP', 'TEST', 'EMERGENCY');
 END IF;
 IF NOT EXISTS (
@@ -95,7 +101,7 @@ ON CONFLICT (admin_code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS calendar_day (
     date DATE PRIMARY KEY,
-    status VARCHAR(10) NOT NULL CHECK (status IN ('ACTIVE', 'HOLIDAY')),
+    status VARCHAR(10) NOT NULL CHECK (status IN ('NORMAL_DAY', 'HOLIDAY', 'WEEKEND')),
     weekday_name VARCHAR(20) NOT NULL
 );
 
@@ -110,9 +116,9 @@ SELECT
         THEN 'HOLIDAY'
 
         WHEN EXTRACT(ISODOW FROM d) = 7
-        THEN 'HOLIDAY'
+        THEN 'WEEKEND'
 
-        ELSE 'ACTIVE'
+        ELSE 'NORMAL_DAY'
     END,
 
     CASE EXTRACT(ISODOW FROM d)
@@ -127,7 +133,7 @@ SELECT
 
 FROM generate_series(
     DATE '2026-01-01',
-    DATE '2040-12-31',
+    DATE '2050-12-31',
     INTERVAL '1 day'
 ) d
 
@@ -204,6 +210,7 @@ CREATE TABLE IF NOT EXISTS doctor_slot (
     slot_status slot_status_enum DEFAULT 'AVAILABLE',
     FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
     FOREIGN KEY (slot_code) REFERENCES slot_code_template(slot_code),
+    admin_status admin_status_enum DEFAULT 'AVAILABLE',
     CONSTRAINT unique_slot UNIQUE (doctor_id, slot_date, slot_code)
 );
 -- =========================================

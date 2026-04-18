@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS healthcare_dw.ods_doctor_cdc
 )
 ENGINE = MergeTree
 ORDER BY (doctor_id, offset);
+===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\admin.sql =====
+select * from admin;.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\init_db.sql =====
 DROP DATABASE IF EXISTS healthcare_booking_realtime;
 CREATE DATABASE healthcare_booking_realtime;.
@@ -297,10 +299,10 @@ SELECT setval('medical_record_record_id_seq', COALESCE((SELECT MAX(record_id) FR
 -- \c healthcare_booking_realtime;
 -- CREATE EXTENSION IF NOT EXISTS "pg_cron";
 -- Drop database nếu tồn tại
-DROP DATABASE IF EXISTS healthcare_booking_realtime;
+-- DROP DATABASE IF EXISTS healthcare_booking_realtime;
 
--- Tạo lại database
-CREATE DATABASE healthcare_booking_realtime;
+-- -- Tạo lại database
+-- CREATE DATABASE healthcare_booking_realtime;
 DO $$ BEGIN IF NOT EXISTS (
     SELECT 1
     FROM pg_type
@@ -328,7 +330,7 @@ END IF;
 IF NOT EXISTS (
     SELECT 1
     FROM pg_type
-    WHERE typname = 'slot_type_enum'
+    WHERE typname = 'slot_type_enum'    
 ) THEN CREATE TYPE slot_type_enum AS ENUM ('CONSULTATION', 'FOLLOW_UP', 'TEST', 'EMERGENCY');
 END IF;
 IF NOT EXISTS (
@@ -386,7 +388,7 @@ ON CONFLICT (admin_code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS calendar_day (
     date DATE PRIMARY KEY,
-    status VARCHAR(10) NOT NULL CHECK (status IN ('ACTIVE', 'HOLIDAY')),
+    status VARCHAR(10) NOT NULL CHECK (status IN ('NORMAL_DAY', 'HOLIDAY', 'WEEKEND')),
     weekday_name VARCHAR(20) NOT NULL
 );
 
@@ -394,13 +396,18 @@ INSERT INTO calendar_day (date, status, weekday_name)
 SELECT
     d::date,
 
-    -- STATUS: Sunday = HOLIDAY, còn lại ACTIVE
     CASE 
-        WHEN EXTRACT(ISODOW FROM d) = 7 THEN 'HOLIDAY'
-        ELSE 'ACTIVE'
+        WHEN (EXTRACT(MONTH FROM d) = 1 AND EXTRACT(DAY FROM d) = 1)
+          OR (EXTRACT(MONTH FROM d) = 4 AND EXTRACT(DAY FROM d) = 30)
+          OR (EXTRACT(MONTH FROM d) = 5 AND EXTRACT(DAY FROM d) = 1)
+        THEN 'HOLIDAY'
+
+        WHEN EXTRACT(ISODOW FROM d) = 7
+        THEN 'WEEKEND'
+
+        ELSE 'NORMAL_DAY'
     END,
 
-    -- WEEKDAY NAME
     CASE EXTRACT(ISODOW FROM d)
         WHEN 1 THEN 'MON'
         WHEN 2 THEN 'TUE'
@@ -413,17 +420,14 @@ SELECT
 
 FROM generate_series(
     DATE '2026-01-01',
-    DATE '2040-12-31',
+    DATE '2030-12-31',
     INTERVAL '1 day'
 ) d
-ON CONFLICT (date) DO NOTHING;
 
-UPDATE calendar_day
-SET status = 'HOLIDAY'
-WHERE (EXTRACT(MONTH FROM date) = 1 AND EXTRACT(DAY FROM date) = 1)  
-OR (EXTRACT(MONTH FROM date) = 4 AND EXTRACT(DAY FROM date) = 30)
-   OR (EXTRACT(MONTH FROM date) = 5 AND EXTRACT(DAY FROM date) = 1);
-
+ON CONFLICT (date) 
+DO UPDATE SET 
+    status = EXCLUDED.status,
+    weekday_name = EXCLUDED.weekday_name;
 -- =========================================
 -- 3) TABLE: slot_code_template
 -- =========================================
@@ -493,6 +497,7 @@ CREATE TABLE IF NOT EXISTS doctor_slot (
     slot_status slot_status_enum DEFAULT 'AVAILABLE',
     FOREIGN KEY (doctor_id) REFERENCES doctor(doctor_id),
     FOREIGN KEY (slot_code) REFERENCES slot_code_template(slot_code),
+    admin_status VARCHAR(10) DEFAULT 'AVAILABLE',
     CONSTRAINT unique_slot UNIQUE (doctor_id, slot_date, slot_code)
 );
 -- =========================================
@@ -617,21 +622,19 @@ JOIN appointment a
     ON ds.slot_id = a.slot_id
 WHERE ds.slot_status = 'BOOKED';.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\doctor2.sql =====
-select * from doctor_slot;    .
+select * from doctor where doctor_id = 'DR001';    .
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\doctor_slot.sql =====
-select * from doctor_slot where doctor_id = 'DR001';.
+select * from doctor_slot where doctor_id = 'DR002';.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft.sql =====
-SELECT doctor_id, specialty
-FROM doctor
-WHERE doctor_id = 1;.
+select * from doctorsels.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft2.sql =====
-select count(*) from doctor_slot WHERE slot_status = 'BOOKED';.
+select slot_id from medical_record where patient_id = 1283;.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft3.sql =====
-select * from appointment;.
+select * from calendar_day where date between date('2026-06-01') AND date('2026-06-30') --- IGNORE ---.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft4.sql =====
-select * from appointment where patient_id = 80;.
+select * from doctor_slot;.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft5.sql =====
-select * from doctor_slot where doctor_id = 'DR001' and slot_date = '2026-04-07';.
+select * from appointment;.
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\draft6.sql =====
 select * from .
 ===== D:\Bách khoa\Kỹ thuật dữ liệu\Healthcare newest\Healthcare-Appointment-Data-Engineering\sql\table_query\get_date.sql =====

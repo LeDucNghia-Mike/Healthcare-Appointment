@@ -39,25 +39,33 @@
 
 @layer theme {
   :root, :host {
+    --color-red-100: #ffe2e2;
+    --color-red-200: #ffcaca;
     --color-red-400: #ff6568;
     --color-red-500: #fb2c36;
+    --color-red-800: #9f0712;
     --color-yellow-50: #fefce8;
     --color-green-50: #f0fdf4;
     --color-green-100: #dcfce7;
+    --color-green-200: #b9f8cf;
+    --color-green-300: #7bf1a8;
     --color-green-400: #05df72;
     --color-green-500: #00c758;
     --color-green-600: #00a544;
+    --color-green-800: #016630;
     --color-blue-50: #eff6ff;
     --color-blue-100: #dbeafe;
     --color-blue-500: #3080ff;
     --color-blue-600: #155dfc;
     --color-pink-100: #fce7f3;
+    --color-pink-400: #fb64b6;
     --color-pink-600: #e30076;
     --color-gray-50: #f9fafb;
     --color-gray-100: #f3f4f6;
     --color-gray-200: #e5e7eb;
     --color-gray-300: #d1d5dc;
     --color-gray-500: #6a7282;
+    --color-gray-600: #4a5565;
     --color-gray-700: #364153;
     --color-black: #000;
     --color-white: #fff;
@@ -87,25 +95,33 @@
 
   @supports (color: lab(0% 0 0)) {
     :root, :host {
+      --color-red-100: lab(92.243% 10.2865 3.83865);
+      --color-red-200: lab(86.017% 19.8815 7.75869);
       --color-red-400: lab(63.7053% 60.7449 31.3109);
       --color-red-500: lab(55.4814% 75.0732 48.8528);
+      --color-red-800: lab(33.7174% 55.8993 41.0293);
       --color-yellow-50: lab(98.6846% -1.79058 9.77662);
       --color-green-50: lab(98.1563% -5.60117 2.75913);
       --color-green-100: lab(96.186% -13.8464 6.52362);
+      --color-green-200: lab(92.4222% -26.4702 12.9427);
+      --color-green-300: lab(86.9953% -47.2691 25.0054);
       --color-green-400: lab(78.503% -64.9265 39.7492);
       --color-green-500: lab(70.5521% -66.5147 45.8072);
       --color-green-600: lab(59.0978% -58.6621 41.2579);
+      --color-green-800: lab(37.4616% -36.7971 22.9692);
       --color-blue-50: lab(96.492% -1.14647 -5.11479);
       --color-blue-100: lab(92.0301% -2.24757 -11.6453);
       --color-blue-500: lab(54.1736% 13.3368 -74.6839);
       --color-blue-600: lab(44.0605% 29.0279 -86.0352);
       --color-pink-100: lab(93.5864% 9.01193 -3.15077);
+      --color-pink-400: lab(64.5597% 64.3615 -12.7988);
       --color-pink-600: lab(49.5493% 79.8381 2.31769);
       --color-gray-50: lab(98.2596% -.247031 -.706708);
       --color-gray-100: lab(96.1596% -.082314 -1.13575);
       --color-gray-200: lab(91.6229% -.159085 -2.26791);
       --color-gray-300: lab(85.1236% -.612259 -3.7138);
       --color-gray-500: lab(47.7841% -.393212 -10.0268);
+      --color-gray-600: lab(35.6337% -1.58697 -10.8425);
       --color-gray-700: lab(27.1134% -.956401 -12.3224);
     }
   }
@@ -364,6 +380,10 @@
     inset-inline-start: var(--spacing);
   }
 
+  .end {
+    inset-inline-end: var(--spacing);
+  }
+
   .mx-auto {
     margin-inline: auto;
   }
@@ -416,12 +436,20 @@
     height: calc(var(--spacing) * 40);
   }
 
+  .min-h-\[90px\] {
+    min-height: 90px;
+  }
+
   .min-h-screen {
     min-height: 100vh;
   }
 
   .w-1\/2 {
     width: 50%;
+  }
+
+  .w-1\/3 {
+    width: 33.3333%;
   }
 
   .w-64 {
@@ -545,9 +573,18 @@
     border-width: 1px;
   }
 
+  .border-2 {
+    border-style: var(--tw-border-style);
+    border-width: 2px;
+  }
+
   .border-b {
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 1px;
+  }
+
+  .border-blue-500 {
+    border-color: var(--color-blue-500);
   }
 
   .bg-black {
@@ -586,6 +623,14 @@
     background-color: var(--color-green-100);
   }
 
+  .bg-green-200 {
+    background-color: var(--color-green-200);
+  }
+
+  .bg-green-300 {
+    background-color: var(--color-green-300);
+  }
+
   .bg-green-400 {
     background-color: var(--color-green-400);
   }
@@ -596,6 +641,18 @@
 
   .bg-pink-100 {
     background-color: var(--color-pink-100);
+  }
+
+  .bg-pink-400 {
+    background-color: var(--color-pink-400);
+  }
+
+  .bg-red-100 {
+    background-color: var(--color-red-100);
+  }
+
+  .bg-red-200 {
+    background-color: var(--color-red-200);
   }
 
   .bg-red-400 {
@@ -706,12 +763,12 @@
     font-weight: var(--font-weight-semibold);
   }
 
-  .text-blue-600 {
-    color: var(--color-blue-600);
-  }
-
   .text-gray-500 {
     color: var(--color-gray-500);
+  }
+
+  .text-gray-600 {
+    color: var(--color-gray-600);
   }
 
   .text-gray-700 {
@@ -722,6 +779,10 @@
     color: var(--color-green-600);
   }
 
+  .text-green-800 {
+    color: var(--color-green-800);
+  }
+
   .text-pink-600 {
     color: var(--color-pink-600);
   }
@@ -730,12 +791,12 @@
     color: var(--color-red-500);
   }
 
-  .text-white {
-    color: var(--color-white);
+  .text-red-800 {
+    color: var(--color-red-800);
   }
 
-  .underline {
-    text-decoration-line: underline;
+  .text-white {
+    color: var(--color-white);
   }
 
   .opacity-50 {
@@ -753,6 +814,12 @@
 
   .transition {
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+
+  .transition-colors {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }

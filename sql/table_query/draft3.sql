@@ -1,1 +1,1 @@
-select * from appointment;
+select * from calendar_day where date between date('2026-06-01') AND date('2026-06-30') --- IGNORE ---

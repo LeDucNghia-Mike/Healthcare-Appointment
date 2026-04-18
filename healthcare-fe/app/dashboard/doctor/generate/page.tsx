@@ -2,157 +2,129 @@
 
 import { useEffect, useState, useMemo } from "react";
 import React from "react";
-
 import { DAYS, DAY_LABEL } from "@/app/constants/date";
 import { SLOT_MAP, SlotCode } from "@/app/constants/slots";
 
+type SlotState = "AVAILABLE" | "NOT AVAILABLE";
+
 export default function GeneratePage() {
-  // ==============================
-  // STATE
-  // ==============================
-  const [grid, setGrid] = useState<Record<string, string>>({});
-  const [isLocked, setIsLocked] = useState(false);
+  const [grid, setGrid] = useState<Record<string, SlotState>>({});
+  // Thay đổi: Cho phép chọn tháng/năm
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 3); // Mặc định month+2 (index+1+2)
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  // ✅ stable userId (tránh re-render không cần thiết)
-  const userId = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("user_id");
-  }, []);
-
-  // ✅ derive SLOTS từ SLOT_MAP
+  const userId = useMemo(() => (typeof window !== "undefined" ? localStorage.getItem("user_id") : null), []);
   const SLOTS = useMemo(() => Object.keys(SLOT_MAP) as SlotCode[], []);
 
-  const { year, month } = useMemo(() => {
+  // Tạo danh sách tháng từ tháng hiện tại + 2 đến 2050
+  const monthOptions = useMemo(() => {
+    const options = [];
     const now = new Date();
-
-    let m = now.getMonth() + 1; // JS: 0-11 → +1 = 1-12
-    let y = now.getFullYear();
-
-    // +2 months
-    m += 2;
-
-    if (m > 12) {
-      m -= 12;
-      y += 1;
+    // Bắt đầu từ tháng hiện tại + 2
+    let startMonth = now.getMonth() + 1 + 2; 
+    let startYear = now.getFullYear();
+    
+    if (startMonth > 12) {
+        startMonth -= 12;
+        startYear += 1;
     }
 
-    return { year: y, month: m };
+    for (let y = startYear; y <= 2050; y++) {
+      for (let m = (y === startYear ? startMonth : 1); m <= 12; m++) {
+        options.push({ month: m, year: y });
+      }
+    }
+    return options;
   }, []);
 
-  // ==============================
-  // FETCH DATA
-  // ==============================
+  // FETCH DATA khi thay đổi tháng/năm
   useEffect(() => {
     if (!userId) return;
+    setGrid({}); // Reset grid khi chuyển tháng
 
-    // preview
-    fetch(`http://127.0.0.1:8000/schedule/preview/${userId}/${year}/${month}`)
-      .then((res) => res.json())
-      .then((data) => setGrid(data));
-
-    // lock check
-    fetch(`http://127.0.0.1:8000/schedule/status/${userId}/${year}/${month}`)
+    fetch(`http://127.0.0.1:8000/schedule/preview/${userId}/${selectedYear}/${selectedMonth}`)
       .then((res) => res.json())
       .then((data) => {
-        if (data?.is_inserted) setIsLocked(true);
+        const fullGrid: Record<string, SlotState> = {};
+        for (const d of DAYS) {
+          for (const slot of SLOTS) {
+            const key = `${d}_${slot}`;
+            fullGrid[key] = data[key] === "GREEN" ? "AVAILABLE" : "NOT AVAILABLE";
+          }
+        }
+        setGrid(fullGrid);
       });
-  }, [userId]);
+  }, [userId, selectedMonth, selectedYear]);
 
-  // ==============================
-  // TOGGLE
-  // ==============================
   const toggle = (key: string) => {
-    if (isLocked) return;
-
     setGrid((prev) => ({
       ...prev,
-      [key]: prev[key] === "GREEN" ? "RED" : "GREEN",
+      [key]: prev[key] === "AVAILABLE" ? "NOT AVAILABLE" : "AVAILABLE",
     }));
   };
 
-  // ==============================
-  // CONFIRM
-  // ==============================
   const handleConfirm = async () => {
-    if (!userId || isLocked) return;
-
-    const slots: { dow: number; slot_code: string }[] = [];
-
-    for (const key in grid) {
-      if (grid[key] === "GREEN") {
+    if (!userId) return;
+    const slots = Object.entries(grid)
+      .filter(([_, val]) => val === "AVAILABLE")
+      .map(([key]) => {
         const [dow, slot_code] = key.split("_");
-        slots.push({
-          dow: Number(dow),
-          slot_code,
-        });
-      }
-    }
+        return { dow: Number(dow), slot_code };
+      });
 
-    await fetch("http://127.0.0.1:8000/schedule/confirm", {
+    const res = await fetch("http://127.0.0.1:8000/schedule/confirm", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         doctor_id: userId,
-        year,
-        month,
+        year: selectedYear,
+        month: selectedMonth,
         slots,
       }),
     });
 
-    alert("Schedule generated!");
-    setIsLocked(true);
+    if (res.ok) alert(`Schedule for ${selectedMonth}/${selectedYear} updated successfully!`);
   };
 
-  // ==============================
-  // UI
-  // ==============================
   if (!userId) return <div>Loading...</div>;
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">
-        Generate Schedule ({month}/{year})
-      </h1>
-
-      {isLocked && (
-        <div className="text-red-500 font-semibold">
-          🔒 This month is locked
-        </div>
-      )}
+    <div className="space-y-4 p-4">
+      <div className="flex items-center gap-4">
+        <h1 className="text-xl font-semibold">Generate Schedule</h1>
+        <select 
+          className="border p-2 rounded"
+          value={`${selectedMonth}-${selectedYear}`}
+          onChange={(e) => {
+            const [m, y] = e.target.value.split("-");
+            setSelectedMonth(Number(m));
+            setSelectedYear(Number(y));
+          }}
+        >
+          {monthOptions.map(opt => (
+            <option key={`${opt.month}-${opt.year}`} value={`${opt.month}-${opt.year}`}>
+              Tháng {opt.month} / {opt.year}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="grid grid-cols-7 gap-2">
-        {/* Header */}
         <div></div>
-        {DAY_LABEL.map((d) => (
-          <div key={d} className="text-center font-semibold">
-            {d}
-          </div>
-        ))}
-
-        {/* Grid */}
+        {DAY_LABEL.map((d) => <div key={d} className="text-center font-semibold">{d}</div>)}
         {SLOTS.map((slot) => (
           <React.Fragment key={slot}>
-            {/* Slot label + time */}
-            <div className="font-semibold">
-              {slot}
-              <div className="text-xs text-gray-500">{SLOT_MAP[slot]}</div>
-            </div>
-
+            <div className="font-semibold">{slot}<div className="text-xs text-gray-500">{SLOT_MAP[slot]}</div></div>
             {DAYS.map((d) => {
               const key = `${d}_${slot}`;
-              const value = grid[key] || "RED";
-
+              const isAvailable = grid[key] === "AVAILABLE";
               return (
-                <div
-                  key={key}
-                  onClick={() => toggle(key)}
-                  className={`p-3 text-center cursor-pointer ${
-                    value === "GREEN" ? "bg-green-400" : "bg-red-400"
-                  } ${isLocked ? "opacity-50 cursor-not-allowed" : ""}`}
+                <div key={key} onClick={() => toggle(key)}
+                  className={`p-3 text-center cursor-pointer transition-colors border rounded ${
+                    isAvailable ? "bg-green-200 text-black" : "bg-red-300 text-black"
+                  }`}
                 >
-                  {value}
+                  {isAvailable ? "AVAILABLE" : "NOT AVAILABLE"}
                 </div>
               );
             })}
@@ -160,16 +132,11 @@ export default function GeneratePage() {
         ))}
       </div>
 
-      {!isLocked && (
-        <div className="flex justify-center mt-4">
-          <button
-            onClick={handleConfirm}
-            className="bg-black text-white px-6 py-2 rounded"
-          >
-            Confirm
-          </button>
-        </div>
-      )}
+      <div className="flex justify-center mt-4">
+        <button onClick={handleConfirm} className="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700">
+          Save & Apply Schedule
+        </button>
+      </div>
     </div>
   );
 }

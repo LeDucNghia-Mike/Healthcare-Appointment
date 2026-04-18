@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 
 type CalendarDay = {
   date: string;
-  status: "ACTIVE" | "HOLIDAY";
+  status: "NORMAL_DAY" | "HOLIDAY" | "WEEKEND";
   weekday_name: string;
 };
 
@@ -60,7 +60,7 @@ export default function AdminCalendar() {
       const { start, end } = getMonthRange(selectedMonth);
 
       const res = await fetch(
-        `http://127.0.0.1:8000/calendar/?start=${start}&end=${end}`
+        `http://127.0.0.1:8000/calendar/?start=${start}&end=${end}`,
       );
 
       const json = await res.json();
@@ -113,7 +113,8 @@ export default function AdminCalendar() {
 
       {!editable && (
         <p className="text-red-500 text-sm">
-          Tháng này chỉ được xem, không được chỉnh sửa
+          This schedule is already set. You can only edit schedules at least 2
+          months in advance.
         </p>
       )}
 
@@ -138,27 +139,25 @@ export default function AdminCalendar() {
               key={d.date}
               className={`
                 p-2 border rounded min-h-[90px] flex flex-col justify-between
-                ${d.status === "HOLIDAY" ? "bg-red-100" : "bg-green-100"}
+                ${d.status === "NORMAL_DAY" ? "bg-green-100" : "bg-red-100"} 
                 ${isToday ? "border-2 border-blue-500" : ""}
               `}
             >
               <div>
                 <div className="text-sm font-semibold">{d.date}</div>
-                <div className="text-xs text-gray-600">
-                  {d.weekday_name}
-                </div>
+                <div className="text-xs text-gray-600">{d.weekday_name}</div>
               </div>
 
               <select
                 value={d.status}
-                disabled={!editable}
-                onChange={(e) =>
-                  handleChange(d.date, e.target.value)
-                }
+                disabled={!editable || d.status === "WEEKEND"}
+                onChange={(e) => handleChange(d.date, e.target.value)}
                 className="mt-2 text-sm border rounded p-1"
               >
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="HOLIDAY">HOLIDAY</option>
+                <option value="NORMAL_DAY">WORKING DAY</option>
+                <option value="HOLIDAY">DAY OFF</option>
+                {/* Thêm dòng này để hứng giá trị WEEKEND từ Database */}
+                <option value="WEEKEND">WEEKEND</option> 
               </select>
             </div>
           );

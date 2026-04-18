@@ -1,1 +1,1 @@
-select * from calendar_day where date = date('2026-04-27');
+select * from doctorsels

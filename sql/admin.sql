@@ -1,1 +1,1 @@
-select * from admin;
+select * from medical_record;;

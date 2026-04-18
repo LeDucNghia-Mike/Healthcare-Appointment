@@ -28,12 +28,20 @@ export default function MedicalRecordListPage() {
   }, [doctorId]);
 
   const filteredRecords = useMemo(() => {
-    const keyword = searchTerm.toLowerCase();
-    return records.filter((item) => 
-      item.patient_name?.toLowerCase().includes(keyword) || 
-      item.slot_code?.toLowerCase().includes(keyword)
+  const keyword = searchTerm.toLowerCase().trim();
+
+  return records.filter((item) => {
+    const patientName = item.patient_name?.toLowerCase() || "";
+    const slotCode = item.slot_code?.toLowerCase() || "";
+    const patientId = String(item.patient_id || "").toLowerCase();
+
+    return (
+      patientName.includes(keyword) ||
+      slotCode.includes(keyword) ||
+      patientId.includes(keyword)
     );
-  }, [records, searchTerm]);
+  });
+}, [records, searchTerm]);
 
   if (loading) return <div className="p-10 text-center font-mono">LOADING_SYSTEM_DATA...</div>;
 
@@ -43,7 +51,7 @@ export default function MedicalRecordListPage() {
       
       <input
         type="text"
-        placeholder="Filter by patient or slot code..."
+        placeholder="Filter by patient or slot code or patient ID..."
         className="w-full border-2 border-black p-3 mb-8 focus:bg-yellow-50 outline-none"
         onChange={(e) => setSearchTerm(e.target.value)}
       />
